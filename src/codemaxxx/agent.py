@@ -43,6 +43,62 @@ _CHOICE_CUE_RE = re.compile(
     re.IGNORECASE,
 )
 _CHOICE_LINE_RE = re.compile(r"^\s*(?:[-*]\s*)?(\d{1,2})[.)]\s+(.+?)\s*$")
+_LOW_INTENT_GREETINGS = {
+    "hey",
+    "hi",
+    "hello",
+    "yo",
+    "sup",
+    "heya",
+    "good morning",
+    "good afternoon",
+    "good evening",
+}
+_LOW_INTENT_ACKS = {
+    "ok",
+    "okay",
+    "k",
+    "sure",
+    "nice",
+    "cool",
+    "thanks",
+    "thank you",
+    "ty",
+}
+_LOW_INTENT_HELP = {
+    "help",
+    "commands",
+}
+_ACTION_HINT_TOKENS = {
+    "build",
+    "create",
+    "generate",
+    "develop",
+    "scaffold",
+    "make",
+    "fix",
+    "debug",
+    "review",
+    "audit",
+    "explain",
+    "analyze",
+    "search",
+    "inspect",
+    "check",
+    "test",
+    "run",
+    "implement",
+    "refactor",
+    "write",
+    "edit",
+    "update",
+    "install",
+    "deploy",
+    "convert",
+    "translate",
+    "summarize",
+    "compare",
+}
 
 _STOPWORDS = {
     "the",
@@ -542,6 +598,46 @@ def _forced_identity_response(user_msg: str) -> str:
     return ""
 
 
+def _quick_prompt_validation_response(user_msg: str) -> str:
+    """Return a concise prompt-validation reply for non-actionable inputs."""
+    raw = (user_msg or "").strip()
+    if not raw or raw.startswith("/"):
+        return ""
+
+    lowered = raw.lower()
+    normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s\?]", " ", lowered)).strip()
+    if not normalized:
+        return ""
+
+    if normalized in _LOW_INTENT_GREETINGS:
+        return (
+            "Hi. Share a specific task and I will execute it.\n\n"
+            "Example: `review all files in this app and list critical bugs`."
+        )
+
+    if normalized in _LOW_INTENT_HELP:
+        return "Use `/help` to see commands, or send a direct task."
+
+    if normalized in _LOW_INTENT_ACKS:
+        return "Ready. Send a concrete task and I will run it."
+
+    tokens = re.findall(r"[a-z0-9_./-]+", normalized)
+    if not tokens:
+        return ""
+
+    has_action_hint = any(tok in _ACTION_HINT_TOKENS for tok in tokens)
+    has_question = "?" in raw
+    has_path_or_command_shape = "/" in raw or "." in raw or raw.startswith("codemax ")
+
+    if len(tokens) <= 2 and not has_action_hint and not has_question and not has_path_or_command_shape:
+        return (
+            "Prompt not actionable yet. Add what you want done.\n\n"
+            "Example: `create a CSR dashboard in /workspace/master`."
+        )
+
+    return ""
+
+
 def _is_build_like_request(user_msg: str) -> bool:
     lowered = (user_msg or "").lower()
     mimic_tokens = (
@@ -760,6 +856,13 @@ async def process_response(
         if db and db.connected:
             db.save_message(session_id, "assistant", forced, workflow_engine.default_model)
         return forced
+
+    validation_reply = _quick_prompt_validation_response(user_msg)
+    if validation_reply:
+        tui.print_assistant_md(validation_reply)
+        if db and db.connected:
+            db.save_message(session_id, "assistant", validation_reply, workflow_engine.default_model)
+        return validation_reply
 
     tui.print_assistant_start()
 
@@ -1143,7 +1246,7 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                     )
                     continue
 
-                tui.print_error(f"Unknown command: {cmd}")
+                tui.print_error(f"Unknown command: {cmd} (use /help)")
                 continue
 
             try:

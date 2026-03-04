@@ -87,8 +87,38 @@ TOOLS = {
 }
 
 
-def execute_tool(name: str, args: dict) -> ToolResult:
+# Memory tools are registered separately since they need the DB instance
+MEMORY_TOOLS = {"recall_memory", "store_memory", "forget_memory"}
+
+
+def execute_tool(name: str, args: dict, db=None) -> ToolResult:
     """Dispatch a tool call."""
+    # Memory tools
+    if name == "recall_memory" and db:
+        key = args.get("key")
+        entries = db.read_memory(key)
+        if not entries:
+            return ToolResult(True, "No memories found." if not key else f"No memory for key '{key}'.")
+        lines = [f"  🧠 {e['key']}: {e['value']}" for e in entries]
+        return ToolResult(True, "Long-term memory:\n" + "\n".join(lines))
+
+    if name == "store_memory" and db:
+        write_key = args.get("write_key", "")
+        ok = db.write_memory(args["key"], args["value"], args.get("model", ""), write_key)
+        if ok:
+            return ToolResult(True, f"✅ Stored memory: {args['key']}")
+        return ToolResult(False, "❌ Write denied — invalid write_key.")
+
+    if name == "forget_memory" and db:
+        write_key = args.get("write_key", "")
+        ok = db.delete_memory(args["key"], write_key)
+        if ok:
+            return ToolResult(True, f"✅ Deleted memory: {args['key']}")
+        return ToolResult(False, "❌ Delete denied — invalid write_key.")
+
+    if name in MEMORY_TOOLS and not db:
+        return ToolResult(False, "❌ Database not connected — memory unavailable.")
+
     handler = TOOLS.get(name)
     if not handler:
         return ToolResult(False, f"❌ Unknown tool: {name}")

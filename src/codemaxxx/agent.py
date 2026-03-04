@@ -3,19 +3,25 @@
 import asyncio
 import json
 import re
+import uuid
 from typing import Optional
 
 from .ollama_client import OllamaClient
 from .tools import execute_tool, ToolResult
+from .database import Database
 from . import tui
 
 TOOL_BLOCK_RE = re.compile(r"```tool\s*\n(.*?)\n```", re.DOTALL)
 MAX_TOOL_ROUNDS = 10
 
 
-async def process_response(client: OllamaClient, user_msg: str):
+async def process_response(client: OllamaClient, user_msg: str, db: Optional[Database] = None, session_id: str = ""):
     """Stream a response and handle tool calls in a loop."""
     tui.print_user_msg(user_msg)
+
+    # Save user message to DB
+    if db and db.connected:
+        db.save_message(session_id, "user", user_msg, client.model)
 
     for round_num in range(MAX_TOOL_ROUNDS):
         tui.print_assistant_start()
@@ -36,6 +42,10 @@ async def process_response(client: OllamaClient, user_msg: str):
         response_text = "".join(full_response)
         tui.console.print()  # newline after stream
 
+        # Save assistant response to DB
+        if db and db.connected:
+            db.save_message(session_id, "assistant", response_text, client.model)
+
         # Render final markdown
         # Check for tool calls
         tool_matches = TOOL_BLOCK_RE.findall(response_text)
@@ -54,7 +64,7 @@ async def process_response(client: OllamaClient, user_msg: str):
                 name = call.get("tool", "")
                 args = call.get("args", {})
                 tui.print_tool_call(name, args)
-                result = execute_tool(name, args)
+                result = execute_tool(name, args, db=db)
                 tui.print_tool_result(result)
                 tool_outputs.append(
                     f"Tool `{name}` result:\n{result.output}"
@@ -81,6 +91,22 @@ def _tool_context_msg(prev_chunks: list) -> str:
 async def run_agent(model: str, host: str):
     """Main agent REPL loop."""
     client = OllamaClient(model=model, host=host)
+    session_id = uuid.uuid4().hex[:12]
+
+    # Initialize PostgreSQL long-term memory
+    db = Database()
+    if db.connect():
+        tui.print_info(f"🧠 Memory connected (machine: {db.machine_uid[:8]}...)")
+        # Load recent memory into system context
+        memories = db.read_memory()
+        if memories:
+            mem_context = "\n".join(f"- {m['key']}: {m['value']}" for m in memories)
+            client.messages.append({
+                "role": "system",
+                "content": f"[Long-term memory for this machine]\n{mem_context}"
+            })
+    else:
+        tui.print_info("💾 Memory offline (PostgreSQL not available — conversations not persisted)")
 
     tui.print_header(model, host)
 
@@ -125,7 +151,11 @@ async def run_agent(model: str, host: str):
 
         # Process with agent
         try:
-            await process_response(client, user_input)
+            await process_response(client, user_input, db=db, session_id=session_id)
         except KeyboardInterrupt:
             tui.console.print("\n[dim]Response cancelled.[/dim]")
             continue
+
+    # Cleanup
+    if db:
+        db.close()

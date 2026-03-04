@@ -72,6 +72,10 @@ else
   warn "python3 not found — TUI agent skipped (install Python 3.10+)"
 fi
 
+# ── 0c. Set up PostgreSQL for long-term memory ────────────────────
+info "Setting up PostgreSQL for long-term memory..."
+bash "${INSTALL_DIR}/setup_db.sh" || warn "PostgreSQL setup skipped — memory will be offline"
+
 # ── 1. Ollama ──────────────────────────────────────────────────────
 info "[1/4] Installing / updating Ollama..."
 if command -v brew >/dev/null 2>&1; then

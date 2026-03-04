@@ -16,6 +16,12 @@ import uuid
 from typing import Optional
 
 from .database import Database, MEMORY_WRITE_KEY
+from .kissme.auth import (
+    AuthStatus,
+    activate_base64_token,
+    get_auth_status,
+)
+from .machine_uid import get_machine_uid
 from .ollama_client import OllamaClient
 from .skills import SKILLS, resolve_skill_models
 from .workflow import ManusWorkflow
@@ -98,6 +104,15 @@ _ACTION_HINT_TOKENS = {
     "translate",
     "summarize",
     "compare",
+}
+_AUTH_ALLOWED_COMMANDS = {
+    "/auth",
+    "/auth-status",
+    "/help",
+    "/commands",
+    "/quit",
+    "/exit",
+    "/q",
 }
 
 _STOPWORDS = {
@@ -598,6 +613,55 @@ def _forced_identity_response(user_msg: str) -> str:
     return ""
 
 
+def _format_duration(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    hours = seconds // 3600
+    mins = (seconds % 3600) // 60
+    if hours <= 0:
+        return f"{mins}m"
+    return f"{hours}h {mins:02d}m"
+
+
+def _render_auth_required_md(status: AuthStatus) -> str:
+    lines = [
+        "## Authenticate",
+        "",
+        f"Authenticate: `{status.token_url}`",
+        "",
+        f"Reason: {status.reason}",
+    ]
+    if status.ssh_key_path:
+        lines.append(f"SSH key: `{status.ssh_key_path}`")
+    if status.ssh_fingerprint:
+        lines.append(f"SSH fingerprint: `{status.ssh_fingerprint}`")
+    lines.extend(
+        [
+            "",
+            "Paste token:",
+            "- `/auth <base64-token>`",
+            "",
+            "Model access is disabled until authentication succeeds.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _render_auth_status_md(status: AuthStatus) -> str:
+    if status.authenticated:
+        lines = [
+            "## Authentication Status",
+            "",
+            "State: active",
+            f"Lease remaining: {_format_duration(status.seconds_left)}",
+        ]
+        if status.expires_at_iso:
+            lines.append(f"Expires at (UTC): `{status.expires_at_iso}`")
+        if status.ssh_fingerprint:
+            lines.append(f"SSH fingerprint: `{status.ssh_fingerprint}`")
+        return "\n".join(lines)
+    return _render_auth_required_md(status)
+
+
 def _quick_prompt_validation_response(user_msg: str) -> str:
     """Return a concise prompt-validation reply for non-actionable inputs."""
     raw = (user_msg or "").strip()
@@ -922,6 +986,7 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
 
     db = Database()
     db_ok = db.connect()
+    machine_uid = db.machine_uid if db_ok else get_machine_uid()
     if db_ok:
         tui.print_info(f"🧠 Memory connected (machine: {db.machine_uid[:8]}...)")
     else:
@@ -965,6 +1030,11 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
     first_prompt = True
     last_assistant_md = ""
     master_emilio_override = False
+    auth_status = get_auth_status(machine_uid)
+    if auth_status.authenticated:
+        tui.print_info(f"🔐 Auth lease active ({_format_duration(auth_status.seconds_left)} remaining).")
+    else:
+        tui.print_assistant_md(_render_auth_required_md(auth_status))
 
     try:
         while True:
@@ -983,6 +1053,7 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                 continue
 
             first_prompt = False
+            auth_status = get_auth_status(machine_uid)
 
             if pending_choice_options and re.fullmatch(r"\d{1,2}", user_input):
                 choice_num = user_input
@@ -1024,6 +1095,27 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
 
             if user_input.startswith("/"):
                 cmd = user_input.lower().split()[0]
+                if cmd == "/auth":
+                    parts = user_input.split(maxsplit=1)
+                    token = parts[1].strip() if len(parts) > 1 else ""
+                    if not token:
+                        token = tui.console.input("[yellow]Base64 token[/yellow] ❯ ").strip()
+                    ok, msg, updated = activate_base64_token(token, machine_uid)
+                    auth_status = updated
+                    if ok:
+                        tui.print_info(msg)
+                        tui.print_assistant_md(_render_auth_status_md(auth_status))
+                    else:
+                        tui.print_error(msg)
+                        tui.print_assistant_md(_render_auth_required_md(auth_status))
+                    continue
+                if cmd == "/auth-status":
+                    auth_status = get_auth_status(machine_uid)
+                    tui.print_assistant_md(_render_auth_status_md(auth_status))
+                    continue
+                if not auth_status.authenticated and cmd not in _AUTH_ALLOWED_COMMANDS:
+                    tui.print_assistant_md(_render_auth_required_md(auth_status))
+                    continue
                 if cmd in ("/quit", "/exit", "/q"):
                     tui.console.print("[dim]Goodbye![/dim]")
                     break
@@ -1250,6 +1342,11 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                 continue
 
             try:
+                auth_status = get_auth_status(machine_uid)
+                if not auth_status.authenticated:
+                    tui.print_assistant_md(_render_auth_required_md(auth_status))
+                    continue
+
                 if not master_emilio_override and _requires_impl_confirmation(user_input):
                     tui.print_assistant_md(_build_preflight_todo(user_input))
                     confirm = tui.console.input("[yellow]Proceed with implementation? [Y/N][/yellow] ").strip().lower()

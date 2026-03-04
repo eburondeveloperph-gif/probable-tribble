@@ -417,6 +417,8 @@ def print_help():
         ("/agents", "Alias for /skills"),
         ("/copy-last", "Copy last assistant response to clipboard"),
         ("/copy <text>", "Copy custom text to clipboard"),
+        ("/auth <base64-token>", "Authenticate and unlock model access"),
+        ("/auth-status", "Show current auth lease state"),
         ("/skills", "Show dedicated skill agents and model routing"),
         ("/skills-custom", "Show user-created custom skills"),
         ("/skill-create <name>", "Create/update your own skill interactively"),

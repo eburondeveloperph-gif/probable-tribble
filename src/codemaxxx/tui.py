@@ -384,6 +384,37 @@ def print_assistant_md(content: str):
     )
 
 
+def print_kissme_entry(
+    portal_url: str,
+    machine_uid: str = "",
+    ssh_fingerprint: str = "",
+    reason: str = "",
+):
+    """Render compact KISSME lock component."""
+    clear_status()
+    finish_stream()
+
+    portal = (portal_url or "").strip() or "auth.eburon.ai"
+    body = Text()
+    body.append("[ KISS ME ]\n", style="bold bright_magenta")
+    body.append("Run ", style="dim")
+    body.append("/kissme", style="brand")
+    body.append(" to connect.\n", style="dim")
+    body.append("Portal: ", style="dim")
+    body.append(portal + "\n", style="assistant")
+    if machine_uid:
+        body.append("Machine UID: ", style="dim")
+        body.append(machine_uid + "\n", style="assistant")
+    if ssh_fingerprint:
+        body.append("SSH: ", style="dim")
+        body.append(ssh_fingerprint + "\n", style="assistant")
+    if reason:
+        body.append("Reason: ", style="dim")
+        body.append(reason, style="error")
+
+    console.print(Panel(body, title="[brand]KISSME[/brand]", border_style="bright_magenta", padding=(0, 1)))
+
+
 def print_tool_call(name: str, args: dict):
     """Print a tool invocation."""
     clear_status()

@@ -48,6 +48,7 @@
     h2 { font-size: 15px; color: var(--accent); }
 
     p, li { margin: 8px 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
+    .small { font-size: 12px; color: var(--muted); margin: 0; }
 
     .field { margin: 10px 0; }
 
@@ -157,9 +158,9 @@
       <p>Use Google or Email auth, then issue a base64 token for the CodeMaxxx CLI.</p>
       <p><span class="pill" id="badge">Auth: not signed in</span></p>
 
-      <h2>1) Sign In</h2>
+      <h2>1) Connect</h2>
       <div class="btns">
-        <button id="btnGoogle" class="primary">Sign In With Google</button>
+        <button id="btnConnect" class="primary">Connect</button>
         <button id="btnLogout">Logout</button>
       </div>
 
@@ -174,8 +175,7 @@
         </div>
       </div>
       <div class="btns">
-        <button id="btnRegister">Register Email</button>
-        <button id="btnLogin">Login Email</button>
+        <p class="small">If email/password is filled, Connect uses email auth. If empty, Connect uses Google.</p>
       </div>
 
       <h2 style="margin-top:14px;">2) Issue Token</h2>
@@ -276,9 +276,7 @@
       secretText: document.getElementById("secretText"),
       secretIssuedText: document.getElementById("secretIssuedText"),
       leaseBox: document.getElementById("leaseBox"),
-      btnGoogle: document.getElementById("btnGoogle"),
-      btnRegister: document.getElementById("btnRegister"),
-      btnLogin: document.getElementById("btnLogin"),
+      btnConnect: document.getElementById("btnConnect"),
       btnLogout: document.getElementById("btnLogout"),
       btnGenerate: document.getElementById("btnGenerate"),
       btnCopy: document.getElementById("btnCopy")
@@ -418,40 +416,33 @@
       );
     }
 
-    async function signInGoogle() {
+    async function connect() {
+      const email = el.email.value.trim();
+      const pass = el.password.value;
+      if (email || pass) {
+        if (!email || !pass) {
+          setStatus("Provide both email and password, or leave both empty for Google.", "warn");
+          return;
+        }
+        try {
+          await auth.signInWithEmailAndPassword(email, pass);
+          return;
+        } catch (_err) {
+          try {
+            await auth.createUserWithEmailAndPassword(email, pass);
+            return;
+          } catch (err) {
+            setStatus("Email connect failed: " + err.message, "err");
+            return;
+          }
+        }
+      }
+
       try {
         const provider = new firebase.auth.GoogleAuthProvider();
         await auth.signInWithPopup(provider);
       } catch (err) {
-        setStatus("Google login failed: " + err.message, "err");
-      }
-    }
-
-    async function registerEmail() {
-      const email = el.email.value.trim();
-      const pass = el.password.value;
-      if (!email || !pass) {
-        setStatus("Email and password are required.", "warn");
-        return;
-      }
-      try {
-        await auth.createUserWithEmailAndPassword(email, pass);
-      } catch (err) {
-        setStatus("Email register failed: " + err.message, "err");
-      }
-    }
-
-    async function loginEmail() {
-      const email = el.email.value.trim();
-      const pass = el.password.value;
-      if (!email || !pass) {
-        setStatus("Email and password are required.", "warn");
-        return;
-      }
-      try {
-        await auth.signInWithEmailAndPassword(email, pass);
-      } catch (err) {
-        setStatus("Email login failed: " + err.message, "err");
+        setStatus("Google connect failed: " + err.message, "err");
       }
     }
 
@@ -578,9 +569,7 @@
       }
     });
 
-    el.btnGoogle.addEventListener("click", signInGoogle);
-    el.btnRegister.addEventListener("click", registerEmail);
-    el.btnLogin.addEventListener("click", loginEmail);
+    el.btnConnect.addEventListener("click", connect);
     el.btnLogout.addEventListener("click", logout);
     el.btnGenerate.addEventListener("click", generateToken);
     el.btnCopy.addEventListener("click", copyToken);

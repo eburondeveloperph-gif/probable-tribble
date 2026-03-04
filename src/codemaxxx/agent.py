@@ -14,6 +14,7 @@ import subprocess
 import sys
 import uuid
 from typing import Optional
+from urllib.parse import urlencode
 
 from .database import Database, MEMORY_WRITE_KEY
 from .kissme.auth import (
@@ -635,7 +636,6 @@ def _render_auth_required_md(status: AuthStatus, machine_uid: str = "") -> str:
         "`[ KISS ME ]` -> `/kissme`",
         "",
         f"KISS ME Portal: `{portal}`",
-        f"Token endpoint: `{status.token_url}`",
         "",
         f"Reason: {status.reason}",
     ]
@@ -678,10 +678,19 @@ def _render_auth_status_md(status: AuthStatus, machine_uid: str = "") -> str:
         return "\n".join(lines)
     return _render_auth_required_md(status, machine_uid=machine_uid)
 
-
-def _open_kissme_portal(portal_url: str) -> tuple[bool, str]:
+def _open_kissme_portal(
+    portal_url: str,
+    machine_uid: str = "",
+    ssh_fingerprint: str = "",
+) -> tuple[bool, str]:
     portal = (portal_url or "").strip() or "auth.eburon.ai"
-    target = portal if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", portal) else f"https://{portal}"
+    base_target = portal if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", portal) else f"https://{portal}"
+    qs: dict[str, str] = {}
+    if machine_uid:
+        qs["machine_uid"] = machine_uid
+    if ssh_fingerprint:
+        qs["ssh_fp"] = ssh_fingerprint
+    target = f"{base_target}?{urlencode(qs)}" if qs else base_target
 
     commands: list[list[str]] = []
     if sys.platform == "darwin":
@@ -1077,7 +1086,12 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
     if auth_status.authenticated:
         tui.print_info(f"🔐 Auth lease active ({_format_duration(auth_status.seconds_left)} remaining).")
     else:
-        tui.print_assistant_md(_render_auth_required_md(auth_status, machine_uid=machine_uid))
+        tui.print_kissme_entry(
+            portal_url=auth_status.portal_url,
+            machine_uid=machine_uid,
+            ssh_fingerprint=auth_status.ssh_fingerprint,
+            reason=auth_status.reason,
+        )
     kissme_lock_visible = not auth_status.authenticated
 
     async def _auth_status_monitor_loop():
@@ -1091,7 +1105,12 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                     kissme_lock_visible = False
                 else:
                     if not kissme_lock_visible:
-                        tui.print_assistant_md(_render_auth_required_md(current, machine_uid=machine_uid))
+                        tui.print_kissme_entry(
+                            portal_url=current.portal_url,
+                            machine_uid=machine_uid,
+                            ssh_fingerprint=current.ssh_fingerprint,
+                            reason=current.reason,
+                        )
                         kissme_lock_visible = True
                 await asyncio.sleep(AUTH_STATUS_POLL_SECONDS)
             except asyncio.CancelledError:
@@ -1175,14 +1194,31 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                     else:
                         kissme_lock_visible = True
                         tui.print_error(msg)
-                        tui.print_assistant_md(_render_auth_required_md(auth_status, machine_uid=machine_uid))
+                        tui.print_kissme_entry(
+                            portal_url=auth_status.portal_url,
+                            machine_uid=machine_uid,
+                            ssh_fingerprint=auth_status.ssh_fingerprint,
+                            reason=auth_status.reason,
+                        )
                     continue
                 if cmd == "/auth-status":
                     auth_status = get_auth_status(machine_uid)
-                    tui.print_assistant_md(_render_auth_status_md(auth_status, machine_uid=machine_uid))
+                    if auth_status.authenticated:
+                        tui.print_assistant_md(_render_auth_status_md(auth_status, machine_uid=machine_uid))
+                    else:
+                        tui.print_kissme_entry(
+                            portal_url=auth_status.portal_url,
+                            machine_uid=machine_uid,
+                            ssh_fingerprint=auth_status.ssh_fingerprint,
+                            reason=auth_status.reason,
+                        )
                     continue
                 if cmd == "/kissme":
-                    ok, msg = _open_kissme_portal(auth_status.portal_url)
+                    ok, msg = _open_kissme_portal(
+                        portal_url=auth_status.portal_url,
+                        machine_uid=machine_uid,
+                        ssh_fingerprint=auth_status.ssh_fingerprint,
+                    )
                     if ok:
                         tui.print_info(msg)
                     else:
@@ -1190,7 +1226,12 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                     continue
                 if not auth_status.authenticated and cmd not in _AUTH_ALLOWED_COMMANDS:
                     kissme_lock_visible = True
-                    tui.print_assistant_md(_render_auth_required_md(auth_status, machine_uid=machine_uid))
+                    tui.print_kissme_entry(
+                        portal_url=auth_status.portal_url,
+                        machine_uid=machine_uid,
+                        ssh_fingerprint=auth_status.ssh_fingerprint,
+                        reason=auth_status.reason,
+                    )
                     continue
                 if cmd in ("/quit", "/exit", "/q"):
                     tui.console.print("[dim]Goodbye![/dim]")
@@ -1421,7 +1462,12 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                 auth_status = get_auth_status(machine_uid)
                 if not auth_status.authenticated:
                     kissme_lock_visible = True
-                    tui.print_assistant_md(_render_auth_required_md(auth_status, machine_uid=machine_uid))
+                    tui.print_kissme_entry(
+                        portal_url=auth_status.portal_url,
+                        machine_uid=machine_uid,
+                        ssh_fingerprint=auth_status.ssh_fingerprint,
+                        reason=auth_status.reason,
+                    )
                     continue
 
                 if not master_emilio_override and _requires_impl_confirmation(user_input):

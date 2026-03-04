@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-AUTH_TOKEN_URL = os.environ.get("CODEMAXXX_AUTH_TOKEN_URL", "https://auth.eburon.ai/token")
+AUTH_TOKEN_URL = os.environ.get("CODEMAXXX_AUTH_TOKEN_URL", "https://auth.eburon.ai")
 AUTH_PORTAL_URL = os.environ.get("CODEMAXXX_AUTH_PORTAL_URL", "auth.eburon.ai")
 AUTH_TTL_SECONDS = max(
     300,

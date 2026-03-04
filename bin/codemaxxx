@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
-#  codemaxxx — One-shot CLI to install Ollama, pull eburonmax/codemax-v3,
+#  codemax — One-shot CLI to install Ollama, pull eburonmax/codemax-v3,
 #              install OpenCode, and launch OpenCode through Ollama.
 #
 #  Usage:
-#    codemaxxx                 # full bootstrap + launch
-#    codemaxxx launch          # quick launch (skip install steps)
-#    codemaxxx install         # install everything, don't launch
-#    codemaxxx pull            # just pull/update the model
-#    codemaxxx help            # show usage
+#    codemax                   # full bootstrap + launch
+#    codemax launch            # quick launch (skip install steps)
+#    codemax install           # install everything, don't launch
+#    codemax pull              # just pull/update the model
+#    codemax help              # show usage
 #
 #  Environment:
 #    EBURON_OLLAMA_MODEL  override model  (default: eburonmax/codemax-v3)
@@ -16,6 +16,18 @@
 set -euo pipefail
 
 MODEL="${EBURON_OLLAMA_MODEL:-eburonmax/codemax-v3}"
+CLI_NAME="${CODEMAX_CLI_NAME:-$(basename "$0")}"
+
+resolve_repo_dir() {
+  local src="${BASH_SOURCE[0]}"
+  while [[ -h "$src" ]]; do
+    local dir
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" != /* ]] && src="${dir}/${src}"
+  done
+  cd -P "$(dirname "$src")/.." && pwd
+}
 
 # ── Helpers ────────────────────────────────────────────────────────
 info()  { printf '  \033[1;34mℹ\033[0m  %s\n' "$*"; }
@@ -107,7 +119,7 @@ launch() {
   step "Launching OpenCode with model ${MODEL}"
 
   if ! command -v ollama >/dev/null 2>&1; then
-    err "ollama not found — run 'codemaxxx install' first"
+    err "ollama not found — run '${CLI_NAME} install' first"
     exit 1
   fi
 
@@ -134,7 +146,7 @@ launch() {
 # ── Full bootstrap ─────────────────────────────────────────────────
 bootstrap() {
   echo ""
-  echo "  🚀  codemaxxx — Eburon CodeMax Bootstrap"
+  echo "  🚀  ${CLI_NAME} — Eburon CodeMax Bootstrap"
   echo "  ─────────────────────────────────────────"
   echo "  Model: ${MODEL}"
   echo ""
@@ -148,22 +160,17 @@ bootstrap() {
 
 # ── CLI entry point ────────────────────────────────────────────────
 usage() {
-  cat <<EOF
-
-  codemaxxx — Eburon CodeMax CLI
-
-  Usage:
-    codemaxxx               Full bootstrap + launch
-    codemaxxx tui            Launch CodeMaxxx TUI agent (interactive)
-    codemaxxx install       Install Ollama, pull model, install OpenCode
-    codemaxxx launch        Quick launch via ollama launch
-    codemaxxx pull          Pull / update the model only
-    codemaxxx help          Show this message
-
-  Environment:
-    EBURON_OLLAMA_MODEL     Override model (default: eburonmax/codemax-v3)
-
-EOF
+  printf '\n'
+  printf '  %s — Eburon CodeMax CLI\n\n' "${CLI_NAME}"
+  printf '  Usage:\n'
+  printf '    %s               Full bootstrap + launch\n' "${CLI_NAME}"
+  printf '    %s tui           Launch CodeMaxxx TUI agent (interactive)\n' "${CLI_NAME}"
+  printf '    %s install       Install Ollama, pull model, install OpenCode\n' "${CLI_NAME}"
+  printf '    %s launch        Quick launch via ollama launch\n' "${CLI_NAME}"
+  printf '    %s pull          Pull / update the model only\n' "${CLI_NAME}"
+  printf '    %s help          Show this message\n\n' "${CLI_NAME}"
+  printf '  Environment:\n'
+  printf '    EBURON_OLLAMA_MODEL     Override model (default: eburonmax/codemax-v3)\n\n'
 }
 
 case "${1:-}" in
@@ -172,17 +179,18 @@ case "${1:-}" in
     ensure_server
     pull_model
     install_opencode
-    ok "All done — run 'codemaxxx launch' to start."
+    ok "All done — run '${CLI_NAME} launch' to start."
     ;;
   tui|agent)
     step "Launching CodeMaxxx TUI Agent"
-    SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+    SCRIPT_DIR="$(resolve_repo_dir)"
+    shift || true
     if [[ -f "${SCRIPT_DIR}/.venv/bin/python" ]]; then
       exec "${SCRIPT_DIR}/.venv/bin/python" -m codemaxxx.main "$@"
     elif [[ -f "${HOME}/.codemaxxx/.venv/bin/python" ]]; then
       exec "${HOME}/.codemaxxx/.venv/bin/python" -m codemaxxx.main "$@"
     else
-      err "Python venv not found — run 'codemaxxx install' first"
+      err "Python venv not found — run '${CLI_NAME} install' first"
       exit 1
     fi
     ;;

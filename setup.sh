@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
-#  codemaxxx one-liner bootstrap
+#  codemax one-liner bootstrap
 #  curl -fsSL https://raw.githubusercontent.com/eburondeveloperph-gif/probable-tribble/main/setup.sh | bash
 #
-#  1) Clones the repo + installs codemaxxx CLI
+#  1) Clones the repo + installs codemax CLI
 #  2) Installs/updates Ollama
 #  3) Pulls eburonmax/codemax-v3
 #  4) Installs OpenCode
@@ -21,30 +21,34 @@ warn()  { printf '  \033[1;33m⚠\033[0m  %s\n' "$*" >&2; }
 die()   { printf '  \033[1;31m✖\033[0m  %s\n' "$*" >&2; exit 1; }
 
 echo ""
-echo "  🚀  codemaxxx — One-Line Bootstrap"
+echo "  🚀  codemax — One-Line Bootstrap"
 echo "  ───────────────────────────────────"
 echo "  Model : ${MODEL}"
 echo "  Install: ${INSTALL_DIR}"
 echo ""
 
-# ── 0. Clone repo + install codemaxxx CLI ──────────────────────────
-info "[0/4] Installing codemaxxx CLI..."
+# ── 0. Clone repo + install codemax CLI ──────────────────────────
+info "[0/4] Installing codemax CLI..."
 if [[ -d "${INSTALL_DIR}/.git" ]]; then
   git -C "${INSTALL_DIR}" pull --quiet 2>/dev/null || true
 else
   rm -rf "${INSTALL_DIR}"
   git clone --quiet "${REPO}" "${INSTALL_DIR}"
 fi
+chmod +x "${INSTALL_DIR}/bin/codemax"
 chmod +x "${INSTALL_DIR}/bin/codemaxxx"
 
 # Symlink into PATH
-BIN_LINK="/usr/local/bin/codemaxxx"
+BIN_LINK="/usr/local/bin/codemax"
 if [[ -w /usr/local/bin ]] 2>/dev/null; then
-  ln -sf "${INSTALL_DIR}/bin/codemaxxx" "${BIN_LINK}"
+  ln -sf "${INSTALL_DIR}/bin/codemax" "${BIN_LINK}"
+  ln -sf "${INSTALL_DIR}/bin/codemaxxx" "/usr/local/bin/codemaxxx"
 elif [[ -d /usr/local/bin ]]; then
-  sudo ln -sf "${INSTALL_DIR}/bin/codemaxxx" "${BIN_LINK}"
+  sudo ln -sf "${INSTALL_DIR}/bin/codemax" "${BIN_LINK}"
+  sudo ln -sf "${INSTALL_DIR}/bin/codemaxxx" "/usr/local/bin/codemaxxx"
 else
   mkdir -p "${HOME}/.local/bin"
+  ln -sf "${INSTALL_DIR}/bin/codemax" "${HOME}/.local/bin/codemax"
   ln -sf "${INSTALL_DIR}/bin/codemaxxx" "${HOME}/.local/bin/codemaxxx"
   export PATH="${HOME}/.local/bin:${PATH}"
 fi
@@ -57,7 +61,7 @@ ZSHRC="${HOME}/.zshrc"
 if ! grep -q 'source "$HOME/.zsh/eburon_bootstrap.zsh"' "${ZSHRC}" 2>/dev/null; then
   printf '\n# Eburon bootstrap (Ollama + OpenCode)\nsource "$HOME/.zsh/eburon_bootstrap.zsh"\n' >> "${ZSHRC}"
 fi
-ok "codemaxxx CLI installed"
+ok "codemax CLI installed"
 
 # ── 0b. Set up Python TUI agent ───────────────────────────────────
 info "Setting up CodeMaxxx TUI agent (Python)..."
@@ -67,7 +71,7 @@ if command -v python3 >/dev/null 2>&1; then
   fi
   "${INSTALL_DIR}/.venv/bin/pip" install --quiet -e "${INSTALL_DIR}" 2>/dev/null || \
   "${INSTALL_DIR}/.venv/bin/pip" install --quiet -r "${INSTALL_DIR}/requirements.txt" 2>/dev/null || true
-  ok "TUI agent ready (run: codemaxxx tui)"
+  ok "TUI agent ready (run: codemax tui)"
 else
   warn "python3 not found — TUI agent skipped (install Python 3.10+)"
 fi
@@ -137,6 +141,6 @@ else
     exec opencode
   else
     echo ""
-    ok "Installation complete! Run 'codemaxxx launch' in a new terminal."
+    ok "Installation complete! Run 'codemax launch' in a new terminal."
   fi
 fi

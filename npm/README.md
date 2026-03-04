@@ -11,11 +11,12 @@ npm i -g eburon-codemaxxx
 ## Usage
 
 ```bash
-eburon-codemaxxx               # launch TUI agent
-eburon-codemaxxx install       # install Ollama + pull model + OpenCode
-eburon-codemaxxx launch        # launch via ollama launch
-eburon-codemaxxx tui           # launch TUI agent
-eburon-codemaxxx help          # show help
+codemax                        # launch TUI agent
+codemax install                # install Ollama + pull model + OpenCode
+codemax launch                 # launch via ollama launch
+codemax tui                    # launch TUI agent
+codemax help                   # show help
+eburon-codemaxxx               # compatibility alias
 ```
 
 ## Other install methods

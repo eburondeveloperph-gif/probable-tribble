@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// eburon-codemaxxx — npm wrapper that bootstraps and launches CodeMaxxx
+// codemax / eburon-codemaxxx — npm wrapper that bootstraps and launches CodeMaxxx
 
 const { execSync, spawn } = require("child_process");
 const path = require("path");
@@ -9,7 +9,8 @@ const os = require("os");
 const INSTALL_DIR = path.join(os.homedir(), ".codemaxxx");
 const REPO = "https://github.com/eburondeveloperph-gif/probable-tribble.git";
 const VENV_PYTHON = path.join(INSTALL_DIR, ".venv", "bin", "python");
-const BASH_CLI = path.join(INSTALL_DIR, "bin", "codemaxxx");
+const BASH_CLI = path.join(INSTALL_DIR, "bin", "codemax");
+const BASH_CLI_COMPAT = path.join(INSTALL_DIR, "bin", "codemaxxx");
 
 function run(cmd, opts = {}) {
   try {
@@ -50,14 +51,15 @@ if (cmd === "tui" || cmd === "") {
     });
     child.on("exit", (code) => process.exit(code || 0));
   } else {
-    console.error("❌ Python venv not found. Run: eburon-codemaxxx install");
+    console.error("❌ Python venv not found. Run: codemax install");
     process.exit(1);
   }
 } else {
   // Delegate to bash CLI for install/launch/pull/help
   ensureRepo();
-  if (fs.existsSync(BASH_CLI)) {
-    const child = spawn("bash", [BASH_CLI, ...args], {
+  const cliPath = fs.existsSync(BASH_CLI) ? BASH_CLI : BASH_CLI_COMPAT;
+  if (fs.existsSync(cliPath)) {
+    const child = spawn("bash", [cliPath, ...args], {
       stdio: "inherit",
       cwd: process.cwd(),
     });

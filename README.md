@@ -26,11 +26,124 @@ brew tap eburondeveloperph-gif/codemaxxx && brew install eburon-codemaxxx
 ## CLI Usage
 
 ```
-codemaxxx               Full bootstrap + launch
-codemaxxx install       Install Ollama, pull model, install OpenCode (no launch)
-codemaxxx launch        Quick launch (skip install steps)
-codemaxxx pull          Pull / update the model only
-codemaxxx help          Show help
+codemax                 Full bootstrap + launch
+codemax install         Install Ollama, pull model, install OpenCode (no launch)
+codemax launch          Quick launch (skip install steps)
+codemax pull            Pull / update the model only
+codemax help            Show help
+codemax tui             Launch autonomous Manus-style multi-agent workflow
+codemaxxx               Compatibility alias
+```
+
+## Autonomous Workflow (Manus-style)
+
+`codemax tui` now runs a dedicated multi-agent flow:
+
+1. Planner agent creates an execution plan
+2. Skill-specific agents execute each step with tool allowlists
+3. Reviewer agent validates outcomes and returns final summary
+4. External GUI/system automation tools require explicit user approval at runtime
+5. Background humor-loading agent generates personality-aware loading lines while tasks run
+6. Terminal frontend renders live token streaming, thinking states, and humorous loading statuses
+
+### Built-in skill agents
+
+Base model pool kept by default:
+
+- `eburonmax/codemax-v3:latest` (19 GB)
+- `codemax-beta:latest` (6.6 GB)
+- `codemax-open:latest` (5.2 GB)
+- `codemax-codex:latest`
+
+Skill agents use dedicated `ebr-*` alias model names with per-agent system prompts.
+If an alias does not exist in Ollama yet, runtime auto-falls back to its base model.
+
+| Skill | Agent alias model | Base model |
+|---|---|---|
+| planner | `ebr-codemax-open-planner:latest` | `codemax-open:latest` |
+| researcher | `ebr-codemax-open-researcher:latest` | `codemax-open:latest` |
+| coder | `ebr-codemax-codex-coder:latest` | `codemax-codex:latest` |
+| tester | `ebr-codemax-beta-tester:latest` | `codemax-beta:latest` |
+| reviewer | `ebr-codemax-beta-reviewer:latest` | `codemax-beta:latest` |
+| docs | `ebr-codemax-open-docs:latest` | `codemax-open:latest` |
+| memory | `ebr-codemax-open-memory:latest` | `codemax-open:latest` |
+| gui_automation | `ebr-codemax-open-gui-automation:latest` | `codemax-open:latest` |
+| direct_system_control | `ebr-codemax-beta-direct-system-control:latest` | `codemax-beta:latest` |
+| call_simulation | `ebr-codemax-open-call-simulation:latest` | `codemax-open:latest` |
+| os_automation | `ebr-codemax-beta-os-automation:latest` | `codemax-beta:latest` |
+| self_heal | `ebr-codemax-codex-self-heal:latest` | `codemax-codex:latest` |
+| user_learning | `ebr-codemax-open-user-learning:latest` | `codemax-open:latest` |
+| personality | `ebr-codemax-open-personality:latest` | `codemax-open:latest` |
+| multilingual_understanding | `ebr-codemax-open-multilingual-understanding:latest` | `codemax-open:latest` |
+| humor_loading | `ebr-codemax-open-humor-loading:latest` | `codemax-open:latest` |
+
+### TUI commands
+
+```
+/skills     Show dedicated skill agents, models, and tools
+/skills-offline  Show offline autonomous skill framework + unified Agent OS map
+/skills-online   Show 30 online-mode autonomous skills
+/skills-all      Show full offline + online skill map
+/skills-custom   Show your custom user-created skills
+/skill-create <name>  Create/update your own skill on demand (interactive)
+/roadmap-online  Show full 50-skill browser/UI online build roadmap
+/roadmap-online-start  Show required start sequence (Search -> ... -> Form filling)
+/roadmap-online-phase <1-7>  Show one roadmap phase (deps + MVP + done checks)
+/autolearn-now  Run DB learning pass immediately
+/personality-save <text>  Save user personality profile to long-term memory
+/personality-show  Show saved personality profile
+/humor-profile <text>  Save loading humor style profile
+/humor-profile-show  Show loading humor profile
+/workflow   Show active workflow summary
+/model ...  Set fallback model for skill routing
+/clear      Reset in-memory skill contexts
+```
+
+### Create your own skill
+
+```text
+/skill-create log-auditor
+```
+
+The CLI will ask for:
+- description
+- allowed tools (CSV)
+- alias model (default `ebr-<skill-name>:latest`)
+- base model (default `codemax-open:latest`)
+- optional custom system prompt
+
+Custom skills are saved to:
+
+```text
+<workspace>/.codemaxxx/custom_skills.json
+```
+
+### Skill framework added
+
+- Offline core autonomy skill sets
+- Offline tool-use, memory/context, reliability, and offline-intelligence skill sets
+- Unified Agent OS shared skills + 5 role tool packs:
+  - coding agent
+  - file organizer
+  - call-center simulator
+  - desktop automation
+  - research assistant
+- Glue skills + minimal must-have autonomy checklist
+- 30 online-mode skills for internet/cloud-enabled operation
+- 50-skill browser/UI online build-order roadmap (dependencies + MVP + done checks)
+- On-demand custom skill creation with local persistence per workspace (`.codemaxxx/custom_skills.json`)
+- 24-hour automatic DB learning timer (`CODEMAXXX_AUTO_LEARN_INTERVAL_SECONDS` to override)
+- User personality save/show support backed by long-term memory
+- Multilingual understanding skill for non-English or mixed-language requests
+- Humor-loading skill agent with personality-aware quips (`CODEMAXXX_HUMOR_AGENT_INTERVAL_SECONDS` to tune interval)
+- Humor output supports playful/annoying/dry modes from learned profile, with unsafe joke filters enabled
+- Loading humor is dynamic (model-generated, non-rotational fallback), can inject native-language expressions, and switches to cheeky mode when user mood is annoyed
+
+### Per-skill model override
+
+```bash
+export CODEMAXXX_SKILL_MODEL_CODER="ebr-codemax-codex-coder:latest"
+export CODEMAXXX_SKILL_MODEL_TESTER="ebr-codemax-beta-tester:latest"
 ```
 
 ## Zsh Functions
@@ -45,7 +158,7 @@ After install, two shell functions are available in any new terminal:
 ## Change Model
 
 ```bash
-export EBURON_OLLAMA_MODEL="eburonmax/codemax-v3"
+export EBURON_OLLAMA_MODEL="eburonmax/codemax-v3:latest"
 ```
 
 Add to `~/.zshrc` to persist.
@@ -55,7 +168,8 @@ Add to `~/.zshrc` to persist.
 ```
 codemaxxx-cli/
 ├── bin/
-│   └── codemaxxx                  # Main CLI (bash)
+│   ├── codemax                    # Main CLI command
+│   └── codemaxxx                  # Compatibility alias
 ├── src/codemaxxx/
 │   ├── main.py                    # CLI entrypoint
 │   ├── agent.py                   # Agent loop

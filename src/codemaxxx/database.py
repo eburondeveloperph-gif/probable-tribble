@@ -1,7 +1,6 @@
 """CodeMaxxx — PostgreSQL long-term memory & conversation storage."""
 
 import os
-import datetime
 from typing import Optional
 
 import psycopg2
@@ -15,8 +14,8 @@ DB_PASS = os.environ.get("CODEMAXXX_DB_PASS", "codemaxxx")
 DB_HOST = os.environ.get("CODEMAXXX_DB_HOST", "localhost")
 DB_PORT = os.environ.get("CODEMAXXX_DB_PORT", "5432")
 
-# The secret key the model must provide to write to long-term memory
-MEMORY_WRITE_KEY = "MyMasterDontAllowMe"
+# The key the model must provide to write/delete long-term memory.
+MEMORY_WRITE_KEY = os.environ.get("CODEMAXXX_MEMORY_WRITE_KEY", "MyMasterDontAllowMe")
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS machines (
@@ -73,7 +72,7 @@ class Database:
             self._init_schema()
             self._register_machine()
             return True
-        except Exception as e:
+        except Exception:
             self._conn = None
             return False
 
@@ -83,6 +82,7 @@ class Database:
 
     def _register_machine(self):
         import platform
+
         with self._conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO machines (machine_uid, hostname)
@@ -154,7 +154,7 @@ class Database:
             return []
 
     def write_memory(self, key: str, value: str, model: str, write_key: str) -> bool:
-        """Write to long-term memory. Requires the secret write key."""
+        """Write to long-term memory. Requires the configured write key."""
         if write_key != MEMORY_WRITE_KEY:
             return False
         if not self.connected:
@@ -175,7 +175,7 @@ class Database:
             return False
 
     def delete_memory(self, key: str, write_key: str) -> bool:
-        """Delete a memory entry. Requires the secret write key."""
+        """Delete a memory entry. Requires the configured write key."""
         if write_key != MEMORY_WRITE_KEY:
             return False
         if not self.connected:

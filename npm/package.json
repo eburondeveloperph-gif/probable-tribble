@@ -5,6 +5,7 @@
   "author": "Eburon Developer",
   "license": "MIT",
   "bin": {
+    "codemax": "./bin/codemaxxx-wrapper.js",
     "eburon-codemaxxx": "./bin/codemaxxx-wrapper.js"
   },
   "keywords": [

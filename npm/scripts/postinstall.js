@@ -46,7 +46,8 @@ if (fs.existsSync(pip)) {
 
 console.log("");
 console.log("  ✅ Installed! Run:");
-console.log("     eburon-codemaxxx           # launch TUI agent");
-console.log("     eburon-codemaxxx install   # install Ollama + model + OpenCode");
-console.log("     eburon-codemaxxx help      # show all commands");
+console.log("     codemax                    # launch TUI agent");
+console.log("     codemax install            # install Ollama + model + OpenCode");
+console.log("     codemax help               # show all commands");
+console.log("     eburon-codemaxxx           # compatibility alias");
 console.log("");

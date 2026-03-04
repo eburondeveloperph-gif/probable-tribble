@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
-#  install.sh — Install codemaxxx CLI + wire zsh bootstrap into shell
+#  install.sh — Install codemax CLI + wire zsh bootstrap into shell
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo ""
-echo "  📦  codemaxxx Installer"
+echo "  📦  codemax Installer"
 echo "  ───────────────────────"
 echo ""
 
 # 1. Make the CLI executable and symlink into PATH
+chmod +x "${SCRIPT_DIR}/bin/codemax"
 chmod +x "${SCRIPT_DIR}/bin/codemaxxx"
 
 if [[ -d /usr/local/bin ]]; then
@@ -21,10 +22,12 @@ else
   mkdir -p "$LINK_DIR"
 fi
 
-echo "  → Linking codemaxxx → ${LINK_DIR}/codemaxxx"
+echo "  → Linking codemax (primary) and codemaxxx (compat) into ${LINK_DIR}"
 if [[ -w "$LINK_DIR" ]]; then
+  ln -sf "${SCRIPT_DIR}/bin/codemax" "${LINK_DIR}/codemax"
   ln -sf "${SCRIPT_DIR}/bin/codemaxxx" "${LINK_DIR}/codemaxxx"
 else
+  sudo ln -sf "${SCRIPT_DIR}/bin/codemax" "${LINK_DIR}/codemax"
   sudo ln -sf "${SCRIPT_DIR}/bin/codemaxxx" "${LINK_DIR}/codemaxxx"
 fi
 
@@ -47,14 +50,15 @@ fi
 echo ""
 echo "  ✅  Installed!  You now have:"
 echo ""
-echo "     codemaxxx               full bootstrap + launch"
-echo "     codemaxxx install       install everything"
-echo "     codemaxxx launch        quick launch"
-echo "     codemaxxx pull          update the model"
+echo "     codemax                 full bootstrap + launch"
+echo "     codemax install         install everything"
+echo "     codemax launch          quick launch"
+echo "     codemax pull            update the model"
+echo "     codemaxxx               compatibility alias"
 echo ""
 echo "     eburon_bootstrap        (zsh function) full bootstrap + launch"
 echo "     eburon_opencode         (zsh function) quick launch"
 echo ""
 echo "  Run 'source ~/.zshrc' or open a new terminal, then:"
-echo "     codemaxxx"
+echo "     codemax"
 echo ""

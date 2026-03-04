@@ -11,7 +11,9 @@ class EburonCodemaxxx < Formula
 
   def install
     # Install bash CLI
-    bin.install "bin/codemaxxx" => "eburon-codemaxxx"
+    bin.install "bin/codemax" => "codemax"
+    bin.install "bin/codemaxxx" => "codemaxxx"
+    bin.install_symlink "codemax" => "eburon-codemaxxx"
 
     # Install zsh bootstrap
     (share/"codemaxxx").install "zsh/eburon_bootstrap.zsh"
@@ -41,11 +43,12 @@ class EburonCodemaxxx < Formula
       🚀 eburon-codemaxxx installed!
 
       Commands:
-        eburon-codemaxxx                # full bootstrap + launch
-        eburon-codemaxxx tui            # TUI agent (alias: eburon-codemaxxx-tui)
-        eburon-codemaxxx install        # install Ollama + model + OpenCode
-        eburon-codemaxxx launch         # quick launch
-        eburon-codemaxxx help           # show help
+        codemax                         # full bootstrap + launch
+        codemax tui                     # TUI agent
+        codemax install                 # install Ollama + model + OpenCode
+        codemax launch                  # quick launch
+        codemax help                    # show help
+        eburon-codemaxxx                # compatibility alias
 
       To add zsh functions (eburon_bootstrap, eburon_opencode):
         echo 'source "#{share}/codemaxxx/eburon_bootstrap.zsh"' >> ~/.zshrc
@@ -53,6 +56,6 @@ class EburonCodemaxxx < Formula
   end
 
   test do
-    assert_match "codemaxxx", shell_output("#{bin}/eburon-codemaxxx help")
+    assert_match "codemax", shell_output("#{bin}/codemax help")
   end
 end

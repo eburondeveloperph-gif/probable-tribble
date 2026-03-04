@@ -17,6 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
+codemax = "codemaxxx.main:main"
 codemaxxx-tui = "codemaxxx.main:main"
 
 [tool.setuptools.packages.find]

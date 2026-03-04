@@ -9,30 +9,18 @@ One-command CLI that bootstraps your local AI coding environment:
 
 ---
 
-## Quick Start
+## Install
 
-**One-liner (recommended):**
-```bash
-curl -fsSL https://raw.githubusercontent.com/eburondeveloperph-gif/probable-tribble/main/setup.sh | bash
-```
-
-**npm:**
 ```bash
 npm i -g eburon-codemaxxx
 ```
 
-**Homebrew:**
 ```bash
-brew tap eburondeveloperph-gif/codemaxxx
-brew install eburon-codemaxxx
+curl -fsSL https://raw.githubusercontent.com/eburondeveloperph-gif/probable-tribble/main/setup.sh | bash
 ```
 
-**Manual:**
 ```bash
-git clone https://github.com/eburondeveloperph-gif/probable-tribble.git codemaxxx-cli
-cd codemaxxx-cli
-bash install.sh        # symlinks CLI + wires zsh functions
-codemaxxx              # bootstrap everything + launch
+brew tap eburondeveloperph-gif/codemaxxx && brew install eburon-codemaxxx
 ```
 
 ## CLI Usage

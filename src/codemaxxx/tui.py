@@ -387,7 +387,6 @@ def print_assistant_md(content: str):
 def print_kissme_entry(
     portal_url: str,
     machine_uid: str = "",
-    ssh_fingerprint: str = "",
     reason: str = "",
 ):
     """Render compact KISSME lock component."""
@@ -405,9 +404,6 @@ def print_kissme_entry(
     if machine_uid:
         body.append("Machine UID: ", style="dim")
         body.append(machine_uid + "\n", style="assistant")
-    if ssh_fingerprint:
-        body.append("SSH: ", style="dim")
-        body.append(ssh_fingerprint + "\n", style="assistant")
     if reason:
         body.append("Reason: ", style="dim")
         body.append(reason, style="error")

@@ -641,10 +641,6 @@ def _render_auth_required_md(status: AuthStatus, machine_uid: str = "") -> str:
     ]
     if machine_uid:
         lines.append(f"Machine UID: `{machine_uid}`")
-    if status.ssh_key_path:
-        lines.append(f"SSH key: `{status.ssh_key_path}`")
-    if status.ssh_fingerprint:
-        lines.append(f"SSH fingerprint: `{status.ssh_fingerprint}`")
     lines.extend(
         [
             "",
@@ -673,23 +669,20 @@ def _render_auth_status_md(status: AuthStatus, machine_uid: str = "") -> str:
         if status.expires_at_iso:
             lines.append(f"Expires at (UTC): `{status.expires_at_iso}`")
         lines.append(f"KISS ME Portal: `{(status.portal_url or '').strip() or 'auth.eburon.ai'}`")
-        if status.ssh_fingerprint:
-            lines.append(f"SSH fingerprint: `{status.ssh_fingerprint}`")
         return "\n".join(lines)
     return _render_auth_required_md(status, machine_uid=machine_uid)
 
 def _open_kissme_portal(
     portal_url: str,
     machine_uid: str = "",
-    ssh_fingerprint: str = "",
 ) -> tuple[bool, str]:
     portal = (portal_url or "").strip() or "auth.eburon.ai"
     base_target = portal if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", portal) else f"https://{portal}"
+    if re.match(r"^https?://[^/]+$", base_target):
+        base_target = base_target.rstrip("/") + "/"
     qs: dict[str, str] = {}
     if machine_uid:
         qs["machine_uid"] = machine_uid
-    if ssh_fingerprint:
-        qs["ssh_fp"] = ssh_fingerprint
     target = f"{base_target}?{urlencode(qs)}" if qs else base_target
 
     commands: list[list[str]] = []
@@ -1089,7 +1082,6 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
         tui.print_kissme_entry(
             portal_url=auth_status.portal_url,
             machine_uid=machine_uid,
-            ssh_fingerprint=auth_status.ssh_fingerprint,
             reason=auth_status.reason,
         )
     kissme_lock_visible = not auth_status.authenticated
@@ -1108,7 +1100,6 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                         tui.print_kissme_entry(
                             portal_url=current.portal_url,
                             machine_uid=machine_uid,
-                            ssh_fingerprint=current.ssh_fingerprint,
                             reason=current.reason,
                         )
                         kissme_lock_visible = True
@@ -1197,7 +1188,6 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                         tui.print_kissme_entry(
                             portal_url=auth_status.portal_url,
                             machine_uid=machine_uid,
-                            ssh_fingerprint=auth_status.ssh_fingerprint,
                             reason=auth_status.reason,
                         )
                     continue
@@ -1209,7 +1199,6 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                         tui.print_kissme_entry(
                             portal_url=auth_status.portal_url,
                             machine_uid=machine_uid,
-                            ssh_fingerprint=auth_status.ssh_fingerprint,
                             reason=auth_status.reason,
                         )
                     continue
@@ -1217,7 +1206,6 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                     ok, msg = _open_kissme_portal(
                         portal_url=auth_status.portal_url,
                         machine_uid=machine_uid,
-                        ssh_fingerprint=auth_status.ssh_fingerprint,
                     )
                     if ok:
                         tui.print_info(msg)
@@ -1229,7 +1217,6 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                     tui.print_kissme_entry(
                         portal_url=auth_status.portal_url,
                         machine_uid=machine_uid,
-                        ssh_fingerprint=auth_status.ssh_fingerprint,
                         reason=auth_status.reason,
                     )
                     continue
@@ -1465,7 +1452,6 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                     tui.print_kissme_entry(
                         portal_url=auth_status.portal_url,
                         machine_uid=machine_uid,
-                        ssh_fingerprint=auth_status.ssh_fingerprint,
                         reason=auth_status.reason,
                     )
                     continue

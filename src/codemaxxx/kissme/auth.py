@@ -1,11 +1,10 @@
-"""KISSME auth gate: SSH-bound 24h lease for TUI access."""
+"""KISSME auth gate: machine-bound 24h lease for TUI access."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import base64
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,13 +20,6 @@ AUTH_STORE_DIR = Path(
     os.path.expanduser(os.environ.get("CODEMAXXX_AUTH_DIR", "~/.codemaxxx/kissme"))
 )
 AUTH_LEASE_FILE = AUTH_STORE_DIR / "auth_lease.json"
-SSH_PUB_ENV = os.environ.get("CODEMAXXX_AUTH_SSH_PUB", "").strip()
-SSH_PUB_CANDIDATES = (
-    "~/.ssh/id_ed25519.pub",
-    "~/.ssh/id_rsa.pub",
-    "~/.ssh/id_ecdsa.pub",
-    "~/.ssh/id_dsa.pub",
-)
 
 
 @dataclass(frozen=True)
@@ -38,8 +30,6 @@ class AuthStatus:
     portal_url: str
     expires_at: Optional[datetime]
     seconds_left: int
-    ssh_key_path: str
-    ssh_fingerprint: str
 
     @property
     def expires_at_iso(self) -> str:
@@ -101,50 +91,6 @@ def _first_present(payload: dict, keys: tuple[str, ...]) -> str:
     return ""
 
 
-def discover_ssh_public_key() -> tuple[str, str]:
-    candidates: list[str] = []
-    if SSH_PUB_ENV:
-        candidates.append(SSH_PUB_ENV)
-    candidates.extend(SSH_PUB_CANDIDATES)
-
-    for candidate in candidates:
-        path = Path(os.path.expanduser(candidate))
-        if not path.exists() or not path.is_file():
-            continue
-        try:
-            content = path.read_text(encoding="utf-8").strip()
-        except Exception:
-            continue
-        if not content:
-            continue
-        return str(path), content
-
-    return "", ""
-
-
-def ssh_fingerprint(pub_key: str) -> str:
-    """Return OpenSSH-style SHA256 fingerprint."""
-    key = (pub_key or "").strip()
-    if not key:
-        return ""
-
-    parts = key.split()
-    if len(parts) >= 2:
-        b64 = parts[1].strip()
-        pad = "=" * (-len(b64) % 4)
-        try:
-            raw = base64.b64decode(b64 + pad, validate=False)
-            digest = hashlib.sha256(raw).digest()
-            text = base64.b64encode(digest).decode("ascii").rstrip("=")
-            return f"SHA256:{text}"
-        except Exception:
-            pass
-
-    digest = hashlib.sha256(key.encode("utf-8")).digest()
-    text = base64.b64encode(digest).decode("ascii").rstrip("=")
-    return f"SHA256:{text}"
-
-
 def _load_lease() -> dict:
     if not AUTH_LEASE_FILE.exists():
         return {}
@@ -195,20 +141,6 @@ def _decode_base64_json(token: str) -> tuple[bool, dict | str]:
 
 def get_auth_status(machine_uid: str) -> AuthStatus:
     now = _utc_now()
-    key_path, key_text = discover_ssh_public_key()
-    if not key_path or not key_text:
-        return AuthStatus(
-            authenticated=False,
-            reason="No SSH public key found. Create one in ~/.ssh and request a token.",
-            token_url=AUTH_TOKEN_URL,
-            portal_url=AUTH_PORTAL_URL,
-            expires_at=None,
-            seconds_left=0,
-            ssh_key_path="",
-            ssh_fingerprint="",
-        )
-
-    fingerprint = ssh_fingerprint(key_text)
     lease = _load_lease()
     if not lease:
         return AuthStatus(
@@ -218,8 +150,6 @@ def get_auth_status(machine_uid: str) -> AuthStatus:
             portal_url=AUTH_PORTAL_URL,
             expires_at=None,
             seconds_left=0,
-            ssh_key_path=key_path,
-            ssh_fingerprint=fingerprint,
         )
 
     lease_machine = str(lease.get("machine_uid", "")).strip()
@@ -231,21 +161,6 @@ def get_auth_status(machine_uid: str) -> AuthStatus:
             portal_url=AUTH_PORTAL_URL,
             expires_at=None,
             seconds_left=0,
-            ssh_key_path=key_path,
-            ssh_fingerprint=fingerprint,
-        )
-
-    lease_fingerprint = str(lease.get("ssh_fingerprint", "")).strip()
-    if lease_fingerprint and lease_fingerprint != fingerprint:
-        return AuthStatus(
-            authenticated=False,
-            reason="SSH fingerprint mismatch. Request a new token for this machine key.",
-            token_url=AUTH_TOKEN_URL,
-            portal_url=AUTH_PORTAL_URL,
-            expires_at=None,
-            seconds_left=0,
-            ssh_key_path=key_path,
-            ssh_fingerprint=fingerprint,
         )
 
     expires_at = _parse_expiry(lease.get("expires_at") or lease.get("exp"))
@@ -257,8 +172,6 @@ def get_auth_status(machine_uid: str) -> AuthStatus:
             portal_url=AUTH_PORTAL_URL,
             expires_at=None,
             seconds_left=0,
-            ssh_key_path=key_path,
-            ssh_fingerprint=fingerprint,
         )
 
     seconds_left = int((expires_at - now).total_seconds())
@@ -270,8 +183,6 @@ def get_auth_status(machine_uid: str) -> AuthStatus:
             portal_url=AUTH_PORTAL_URL,
             expires_at=expires_at,
             seconds_left=0,
-            ssh_key_path=key_path,
-            ssh_fingerprint=fingerprint,
         )
 
     return AuthStatus(
@@ -281,18 +192,10 @@ def get_auth_status(machine_uid: str) -> AuthStatus:
         portal_url=AUTH_PORTAL_URL,
         expires_at=expires_at,
         seconds_left=seconds_left,
-        ssh_key_path=key_path,
-        ssh_fingerprint=fingerprint,
     )
 
 
 def activate_base64_token(token: str, machine_uid: str) -> tuple[bool, str, AuthStatus]:
-    key_path, key_text = discover_ssh_public_key()
-    if not key_path or not key_text:
-        status = get_auth_status(machine_uid)
-        return False, "SSH public key missing. Create one first (for example ~/.ssh/id_ed25519.pub).", status
-
-    fingerprint = ssh_fingerprint(key_text)
     ok, decoded = _decode_base64_json(token)
     if not ok:
         status = get_auth_status(machine_uid)
@@ -301,8 +204,11 @@ def activate_base64_token(token: str, machine_uid: str) -> tuple[bool, str, Auth
     payload = decoded
     now = _utc_now()
 
-    token_machine = _first_present(payload, ("machine_uid", "machine", "uid"))
-    if token_machine and token_machine != machine_uid:
+    token_machine = _first_present(payload, ("machine_uid", "machine", "uid_machine"))
+    if not token_machine:
+        status = get_auth_status(machine_uid)
+        return False, "Token missing machine UID.", status
+    if token_machine != machine_uid:
         status = get_auth_status(machine_uid)
         return False, "Token machine does not match this machine.", status
 
@@ -310,11 +216,6 @@ def activate_base64_token(token: str, machine_uid: str) -> tuple[bool, str, Auth
     if not token_uid:
         status = get_auth_status(machine_uid)
         return False, "Token missing user UID.", status
-
-    token_fp = _first_present(payload, ("ssh_fingerprint", "ssh_fp", "fingerprint"))
-    if token_fp and token_fp != fingerprint:
-        status = get_auth_status(machine_uid)
-        return False, "Token SSH fingerprint mismatch for this machine key.", status
 
     token_secret = _first_present(payload, ("kissme_secret", "secret_code", "secret"))
     if len(token_secret) < 8:
@@ -341,9 +242,7 @@ def activate_base64_token(token: str, machine_uid: str) -> tuple[bool, str, Auth
         "issuer": _first_present(payload, ("issuer", "iss")) or "auth.eburon.ai",
         "uid": token_uid,
         "machine_uid": machine_uid,
-        "ssh_fingerprint": fingerprint,
         "kissme_secret": token_secret,
-        "ssh_key_path": key_path,
         "issued_at": _to_iso(now),
         "expires_at": _to_iso(expires_at),
         "token_preview": (token or "").strip()[-10:],

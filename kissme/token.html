@@ -183,23 +183,8 @@
         <label for="machineUid">Machine UID (from CLI)</label>
         <input id="machineUid" type="text" placeholder="32-char machine uid" />
       </div>
-      <div class="field">
-        <label for="sshFp">SSH Fingerprint (from CLI)</label>
-        <input id="sshFp" type="text" placeholder="SHA256:..." />
-      </div>
-      <div class="row">
-        <div class="field">
-          <label for="leaseHours">Lease Hours (max 24)</label>
-          <input id="leaseHours" type="number" min="1" max="24" value="24" />
-        </div>
-        <div class="field">
-          <label for="note">Note</label>
-          <input id="note" type="text" placeholder="new or returning" />
-        </div>
-      </div>
       <div class="btns">
-        <button id="btnGenerate" class="primary" disabled>Generate Base64 Token</button>
-        <button id="btnCopy" disabled>Copy Token</button>
+        <button id="btnCopy" disabled>Copy Latest Token</button>
       </div>
 
       <div id="status" class="status">Waiting for authentication...</div>
@@ -217,6 +202,7 @@
       <p><span class="k">Returning User:</span><span id="returningText">-</span></p>
       <p><span class="k">Session Secret:</span><span id="secretText">-</span></p>
       <p><span class="k">Secret Issued:</span><span id="secretIssuedText">-</span></p>
+      <p><span class="k">Machine Countdown:</span><span id="machineCountdownText">-</span></p>
 
       <h2 style="margin-top:14px;">Last Lease</h2>
       <pre id="leaseBox" class="mono">No lease yet.</pre>
@@ -257,7 +243,8 @@
       sessionSecret: "",
       sessionSecretIssuedAtMs: 0,
       token: "",
-      lastLease: null
+      lastLease: null,
+      countdownTimer: null
     };
 
     const el = {
@@ -265,9 +252,6 @@
       email: document.getElementById("email"),
       password: document.getElementById("password"),
       machineUid: document.getElementById("machineUid"),
-      sshFp: document.getElementById("sshFp"),
-      leaseHours: document.getElementById("leaseHours"),
-      note: document.getElementById("note"),
       status: document.getElementById("status"),
       tokenOut: document.getElementById("tokenOut"),
       uidText: document.getElementById("uidText"),
@@ -275,10 +259,10 @@
       returningText: document.getElementById("returningText"),
       secretText: document.getElementById("secretText"),
       secretIssuedText: document.getElementById("secretIssuedText"),
+      machineCountdownText: document.getElementById("machineCountdownText"),
       leaseBox: document.getElementById("leaseBox"),
       btnConnect: document.getElementById("btnConnect"),
       btnLogout: document.getElementById("btnLogout"),
-      btnGenerate: document.getElementById("btnGenerate"),
       btnCopy: document.getElementById("btnCopy")
     };
 
@@ -300,14 +284,6 @@
 
     function randomSecret() {
       return "KMS-" + randomHex(12);
-    }
-
-    function clampHours(v) {
-      let n = parseInt(String(v || "24"), 10);
-      if (!Number.isFinite(n)) n = 24;
-      if (n < 1) n = 1;
-      if (n > 24) n = 24;
-      return n;
     }
 
     function b64Json(obj) {
@@ -369,23 +345,66 @@
       });
     }
 
+    function _formatCountdown(msLeft) {
+      const total = Math.max(0, Math.floor(msLeft / 1000));
+      const h = Math.floor(total / 3600);
+      const m = Math.floor((total % 3600) / 60);
+      const s = total % 60;
+      return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+    }
+
+    function startMachineCountdown(expMs) {
+      if (st.countdownTimer) {
+        clearInterval(st.countdownTimer);
+        st.countdownTimer = null;
+      }
+      if (!expMs || !Number.isFinite(expMs)) {
+        el.machineCountdownText.textContent = "-";
+        return;
+      }
+      const tick = () => {
+        const left = expMs - Date.now();
+        if (left <= 0) {
+          el.machineCountdownText.textContent = "expired";
+          if (st.countdownTimer) {
+            clearInterval(st.countdownTimer);
+            st.countdownTimer = null;
+          }
+          return;
+        }
+        el.machineCountdownText.textContent = _formatCountdown(left);
+      };
+      tick();
+      st.countdownTimer = setInterval(tick, 1000);
+    }
+
     async function loadLastLease(uid) {
+      const machineUid = el.machineUid.value.trim();
       const snap = await db.ref("kissme_auth_users/" + uid + "/leases")
         .orderByChild("issuedAtMs")
-        .limitToLast(1)
+        .limitToLast(60)
         .once("value");
 
       let lease = null;
       snap.forEach((child) => {
-        lease = child.val() || {};
-        lease.key_id = lease.key_id || child.key;
+        const candidate = child.val() || {};
+        candidate.key_id = candidate.key_id || child.key;
+        if (machineUid && candidate.machine_uid !== machineUid) {
+          return;
+        }
+        if (!lease || (candidate.issuedAtMs || 0) > (lease.issuedAtMs || 0)) {
+          lease = candidate;
+        }
       });
 
       st.lastLease = lease;
       if (!lease) {
         el.leaseBox.textContent = "No lease yet.";
+        startMachineCountdown(0);
       } else {
         el.leaseBox.textContent = JSON.stringify(lease, null, 2);
+        const expMs = Number(lease.exp || 0) * 1000;
+        startMachineCountdown(expMs);
       }
     }
 
@@ -395,8 +414,8 @@
       el.returningText.textContent = st.returning ? "yes" : "no";
       el.secretText.textContent = st.sessionSecret || "-";
       el.secretIssuedText.textContent = st.sessionSecretIssuedAtMs ? nowIso(st.sessionSecretIssuedAtMs) : "-";
-      el.btnGenerate.disabled = !(st.uid && st.sessionSecret);
       el.badge.textContent = st.uid ? ("Auth UID: " + st.uid) : "Auth: not signed in";
+      el.btnCopy.disabled = !(st.uid && st.token);
     }
 
     async function onSignedIn(user) {
@@ -406,12 +425,17 @@
 
       const session = await createSessionSecret(st.uid, st.provider);
       await loadLastLease(st.uid);
+      const machineUid = el.machineUid.value.trim();
+      if (machineUid) {
+        await generateToken(true);
+      }
 
       renderUser();
       setStatus(
         "Signed in. New session code generated.\n" +
         "uid: " + st.uid + "\n" +
-        "secret: " + session.secret_code,
+        "secret: " + session.secret_code + "\n" +
+        (machineUid ? "Machine token refreshed for 24h." : "Paste machine UID then reconnect."),
         "ok"
       );
     }
@@ -464,23 +488,17 @@
       }
     }
 
-    async function generateToken() {
+    async function generateToken(silent = false) {
       if (!st.uid || !st.sessionSecret) {
-        setStatus("Sign in first. Session secret is required.", "warn");
+        if (!silent) setStatus("Sign in first. Session secret is required.", "warn");
         return;
       }
 
       const machineUid = el.machineUid.value.trim();
-      const sshFp = el.sshFp.value.trim();
-      const hours = clampHours(el.leaseHours.value);
-      const note = el.note.value.trim();
+      const hours = 24;
 
       if (!machineUid) {
-        setStatus("Machine UID is required.", "err");
-        return;
-      }
-      if (!sshFp) {
-        setStatus("SSH fingerprint is required.", "err");
+        if (!silent) setStatus("Machine UID is required.", "err");
         return;
       }
 
@@ -495,7 +513,6 @@
           uid: st.uid,
           key_id: keyId,
           machine_uid: machineUid,
-          ssh_fingerprint: sshFp,
           kissme_secret: st.sessionSecret,
           auth_provider: st.provider,
           iat,
@@ -507,7 +524,6 @@
         const token = b64Json(payload);
         const lease = {
           ...payload,
-          note,
           issuedAtMs: nowMs,
           issuedAtIso: nowIso(nowMs),
           expiresAtIso: nowIso(exp * 1000),
@@ -519,25 +535,27 @@
           lastLeaseKeyId: keyId,
           lastIssuedAtMs: nowMs,
           lastIssuedAtIso: nowIso(nowMs),
-          lastMachineUid: machineUid,
-          lastSshFingerprint: sshFp
+          lastMachineUid: machineUid
         });
 
         st.token = token;
         st.lastLease = lease;
         el.tokenOut.value = token;
         el.leaseBox.textContent = JSON.stringify(lease, null, 2);
+        startMachineCountdown(exp * 1000);
         el.btnCopy.disabled = false;
 
-        setStatus(
-          "Token generated.\n" +
-          "uid: " + st.uid + "\n" +
-          "key_id: " + keyId + "\n" +
-          "Use in CLI: /auth <token>",
-          "ok"
-        );
+        if (!silent) {
+          setStatus(
+            "Token generated.\n" +
+            "uid: " + st.uid + "\n" +
+            "key_id: " + keyId + "\n" +
+            "Use in CLI: /auth <token>",
+            "ok"
+          );
+        }
       } catch (err) {
-        setStatus("Token generation failed: " + err.message, "err");
+        if (!silent) setStatus("Token generation failed: " + err.message, "err");
       }
     }
 
@@ -559,6 +577,9 @@
         st.returning = false;
         st.sessionSecret = "";
         st.sessionSecretIssuedAtMs = 0;
+        st.token = "";
+        el.tokenOut.value = "";
+        startMachineCountdown(0);
         renderUser();
         return;
       }
@@ -571,8 +592,20 @@
 
     el.btnConnect.addEventListener("click", connect);
     el.btnLogout.addEventListener("click", logout);
-    el.btnGenerate.addEventListener("click", generateToken);
     el.btnCopy.addEventListener("click", copyToken);
+    el.machineUid.addEventListener("change", async () => {
+      if (st.uid) {
+        await loadLastLease(st.uid);
+        await generateToken(true);
+      }
+    });
+
+    const params = new URLSearchParams(window.location.search || "");
+    const machineFromQuery = (params.get("machine_uid") || "").trim();
+    if (machineFromQuery) {
+      el.machineUid.value = machineFromQuery;
+      setStatus("Machine UID autofilled from KISS ME link.", "ok");
+    }
 
     renderUser();
   </script>

@@ -11,6 +11,23 @@ One-command CLI that bootstraps your local AI coding environment:
 
 ## Quick Start
 
+**One-liner (recommended):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/eburondeveloperph-gif/probable-tribble/main/setup.sh | bash
+```
+
+**npm:**
+```bash
+npm i -g eburon-codemaxxx
+```
+
+**Homebrew:**
+```bash
+brew tap eburondeveloperph-gif/codemaxxx
+brew install eburon-codemaxxx
+```
+
+**Manual:**
 ```bash
 git clone https://github.com/eburondeveloperph-gif/probable-tribble.git codemaxxx-cli
 cd codemaxxx-cli
@@ -51,9 +68,21 @@ Add to `~/.zshrc` to persist.
 codemaxxx-cli/
 ├── bin/
 │   └── codemaxxx                  # Main CLI (bash)
+├── src/codemaxxx/
+│   ├── main.py                    # CLI entrypoint
+│   ├── agent.py                   # Agent loop
+│   ├── ollama_client.py           # Streaming Ollama client
+│   ├── tools.py                   # File/shell/memory tools
+│   ├── tui.py                     # Rich TUI layout
+│   ├── database.py                # PostgreSQL long-term memory
+│   └── machine_uid.py             # Silent machine fingerprint
+├── npm/                           # npm package (eburon-codemaxxx)
+├── homebrew/                      # Homebrew formula
 ├── zsh/
-│   └── eburon_bootstrap.zsh      # Zsh functions (sourced by .zshrc)
-├── install.sh                     # Installer
+│   └── eburon_bootstrap.zsh       # Zsh functions
+├── setup.sh                       # curl one-liner installer
+├── setup_db.sh                    # PostgreSQL auto-setup
+├── install.sh                     # Manual installer
 └── README.md
 ```
 

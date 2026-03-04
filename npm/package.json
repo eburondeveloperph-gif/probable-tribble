@@ -1,0 +1,31 @@
+{
+  "name": "eburon-codemaxxx",
+  "version": "0.1.0",
+  "description": "CodeMaxxx — AI coding agent for the terminal, powered by Ollama & eburonmax/codemax-v3",
+  "author": "Eburon Developer",
+  "license": "MIT",
+  "bin": {
+    "eburon-codemaxxx": "./bin/codemaxxx-wrapper.js"
+  },
+  "keywords": [
+    "ai",
+    "coding",
+    "agent",
+    "terminal",
+    "ollama",
+    "codemaxxx",
+    "eburon",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eburondeveloperph-gif/probable-tribble.git"
+  },
+  "scripts": {
+    "postinstall": "node ./scripts/postinstall.js"
+  },
+  "os": ["darwin", "linux"],
+  "engines": {
+    "node": ">=16"
+  }
+}

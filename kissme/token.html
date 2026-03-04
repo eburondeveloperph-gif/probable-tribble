@@ -61,7 +61,7 @@
       color: var(--muted);
     }
 
-    input, textarea {
+    input, textarea, select {
       width: 100%;
       background: #0a1228;
       color: var(--text);
@@ -155,13 +155,13 @@
   <div class="wrap">
     <section class="card">
       <h1>KISSME Auth</h1>
-      <p>Use Google or Email auth, then issue a base64 token for the CodeMaxxx CLI.</p>
+      <p>Use Google or Email auth, then issue a Firebase-verified signed token for the CodeMaxxx CLI.</p>
       <p><span class="pill" id="badge">Auth: not signed in</span></p>
 
       <h2>1) Connect</h2>
       <div class="btns">
         <button id="btnConnect" class="primary">Connect</button>
-        <button id="btnLogout">Logout</button>
+        <button id="btnKissme">KISSME</button>
       </div>
 
       <div class="row">
@@ -182,6 +182,13 @@
       <div class="field">
         <label for="machineUid">Machine UID (from CLI)</label>
         <input id="machineUid" type="text" placeholder="32-char machine uid" />
+      </div>
+      <div class="field">
+        <label for="didKissme">Did he KISSME? (yes/no)</label>
+        <select id="didKissme">
+          <option value="no">no</option>
+          <option value="yes">yes</option>
+        </select>
       </div>
       <div class="btns">
         <button id="btnCopy" disabled>Copy Latest Token</button>
@@ -220,7 +227,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
   <script>
-    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
     const firebaseConfig = {
       apiKey: "AIzaSyB2j-StB_bC9xbsgifFNkM3VIyDGJmZ7rQ",
       authDomain: "impactful-ring-469323-e5.firebaseapp.com",
@@ -252,6 +258,7 @@
       email: document.getElementById("email"),
       password: document.getElementById("password"),
       machineUid: document.getElementById("machineUid"),
+      didKissme: document.getElementById("didKissme"),
       status: document.getElementById("status"),
       tokenOut: document.getElementById("tokenOut"),
       uidText: document.getElementById("uidText"),
@@ -262,7 +269,7 @@
       machineCountdownText: document.getElementById("machineCountdownText"),
       leaseBox: document.getElementById("leaseBox"),
       btnConnect: document.getElementById("btnConnect"),
-      btnLogout: document.getElementById("btnLogout"),
+      btnKissme: document.getElementById("btnKissme"),
       btnCopy: document.getElementById("btnCopy")
     };
 
@@ -299,6 +306,24 @@
       if (id === "google.com") return "google";
       if (id === "password") return "email";
       return id || "unknown";
+    }
+
+    function normalizeYesNo(value) {
+      const v = String(value || "").trim().toLowerCase();
+      if (v === "yes" || v === "y" || v === "true" || v === "1") return "yes";
+      if (v === "no" || v === "n" || v === "false" || v === "0") return "no";
+      return "";
+    }
+
+    function portalUrlWithMachine() {
+      const target = new URL(window.location.href);
+      const machineUid = el.machineUid.value.trim();
+      if (machineUid) {
+        target.searchParams.set("machine_uid", machineUid);
+      } else {
+        target.searchParams.delete("machine_uid");
+      }
+      return target.toString();
     }
 
     async function createSessionSecret(uid, provider) {
@@ -359,13 +384,13 @@
         st.countdownTimer = null;
       }
       if (!expMs || !Number.isFinite(expMs)) {
-        el.machineCountdownText.textContent = "-";
+        el.machineCountdownText.textContent = "00:00:00";
         return;
       }
       const tick = () => {
         const left = expMs - Date.now();
         if (left <= 0) {
-          el.machineCountdownText.textContent = "expired";
+          el.machineCountdownText.textContent = "00:00:00";
           if (st.countdownTimer) {
             clearInterval(st.countdownTimer);
             st.countdownTimer = null;
@@ -401,11 +426,17 @@
       if (!lease) {
         el.leaseBox.textContent = "No lease yet.";
         startMachineCountdown(0);
-      } else {
-        el.leaseBox.textContent = JSON.stringify(lease, null, 2);
-        const expMs = Number(lease.exp || 0) * 1000;
-        startMachineCountdown(expMs);
+        return;
       }
+
+      el.leaseBox.textContent = JSON.stringify(lease, null, 2);
+      const didKissme = normalizeYesNo(lease.did_kissme || lease.didHeKissme || lease.kissme);
+      if (didKissme !== "yes") {
+        startMachineCountdown(0);
+        return;
+      }
+      const expMs = Number(lease.exp || 0) * 1000;
+      startMachineCountdown(expMs);
     }
 
     function renderUser() {
@@ -426,6 +457,7 @@
       const session = await createSessionSecret(st.uid, st.provider);
       await loadLastLease(st.uid);
       const machineUid = el.machineUid.value.trim();
+      const didKissme = normalizeYesNo(el.didKissme.value);
       if (machineUid) {
         await generateToken(true);
       }
@@ -435,7 +467,11 @@
         "Signed in. New session code generated.\n" +
         "uid: " + st.uid + "\n" +
         "secret: " + session.secret_code + "\n" +
-        (machineUid ? "Machine token refreshed for 24h." : "Paste machine UID then reconnect."),
+        (machineUid
+          ? (didKissme === "yes"
+              ? "Signed token refreshed for 24h."
+              : "did_kissme=no. Countdown stays 00:00:00.")
+          : "Paste machine UID then reconnect."),
         "ok"
       );
     }
@@ -470,22 +506,10 @@
       }
     }
 
-    async function logout() {
-      try {
-        await auth.signOut();
-        st.uid = "";
-        st.provider = "";
-        st.returning = false;
-        st.sessionSecret = "";
-        st.sessionSecretIssuedAtMs = 0;
-        st.token = "";
-        el.tokenOut.value = "";
-        el.btnCopy.disabled = true;
-        renderUser();
-        setStatus("Signed out.", "warn");
-      } catch (err) {
-        setStatus("Logout failed: " + err.message, "err");
-      }
+    function openKissme() {
+      const target = portalUrlWithMachine();
+      window.open(target, "_blank", "noopener,noreferrer");
+      setStatus("KISSME link opened. In CLI, run /kissme or paste token into /auth.", "ok");
     }
 
     async function generateToken(silent = false) {
@@ -494,40 +518,65 @@
         return;
       }
 
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        if (!silent) setStatus("Authentication expired. Click Connect again.", "warn");
+        return;
+      }
+
       const machineUid = el.machineUid.value.trim();
+      const didKissme = normalizeYesNo(el.didKissme.value);
       const hours = 24;
 
       if (!machineUid) {
         if (!silent) setStatus("Machine UID is required.", "err");
         return;
       }
+      if (!didKissme) {
+        if (!silent) setStatus("Answer required: Did he KISSME? yes/no.", "warn");
+        return;
+      }
 
       try {
         const nowMs = Date.now();
         const iat = Math.floor(nowMs / 1000);
-        const exp = iat + hours * 3600;
+        const exp = didKissme === "yes" ? iat + hours * 3600 : iat;
         const keyId = randomHex(12);
+        const firebaseIdToken = await currentUser.getIdToken(true);
 
-        const payload = {
+        const signedPayload = {
           issuer: "auth.eburon.ai",
           uid: st.uid,
           key_id: keyId,
           machine_uid: machineUid,
           kissme_secret: st.sessionSecret,
+          did_kissme: didKissme,
           auth_provider: st.provider,
+          firebase_id_token: firebaseIdToken,
           iat,
           exp,
-          lease_hours: hours,
-          version: "kissme-2"
+          lease_hours: didKissme === "yes" ? hours : 0,
+          version: "kissme-3",
+          token_type: "firebase_signed"
         };
-
-        const token = b64Json(payload);
+        const signedToken = b64Json(signedPayload);
         const lease = {
-          ...payload,
+          issuer: signedPayload.issuer,
+          uid: signedPayload.uid,
+          key_id: signedPayload.key_id,
+          machine_uid: signedPayload.machine_uid,
+          kissme_secret: signedPayload.kissme_secret,
+          did_kissme: signedPayload.did_kissme,
+          auth_provider: signedPayload.auth_provider,
+          iat: signedPayload.iat,
+          exp: signedPayload.exp,
+          lease_hours: signedPayload.lease_hours,
+          version: signedPayload.version,
+          token_type: signedPayload.token_type,
           issuedAtMs: nowMs,
           issuedAtIso: nowIso(nowMs),
           expiresAtIso: nowIso(exp * 1000),
-          tokenPreview: token.slice(0, 16) + "..." + token.slice(-10)
+          tokenPreview: signedToken.slice(0, 20) + "..." + signedToken.slice(-14)
         };
 
         await db.ref("kissme_auth_users/" + st.uid + "/leases/" + keyId).set(lease);
@@ -535,24 +584,37 @@
           lastLeaseKeyId: keyId,
           lastIssuedAtMs: nowMs,
           lastIssuedAtIso: nowIso(nowMs),
-          lastMachineUid: machineUid
+          lastMachineUid: machineUid,
+          did_kissme: didKissme,
+          didKissmeAnsweredAtMs: nowMs,
+          didKissmeAnsweredAtIso: nowIso(nowMs)
         });
 
-        st.token = token;
+        st.token = didKissme === "yes" ? signedToken : "";
         st.lastLease = lease;
-        el.tokenOut.value = token;
+        el.tokenOut.value = didKissme === "yes" ? signedToken : "";
         el.leaseBox.textContent = JSON.stringify(lease, null, 2);
-        startMachineCountdown(exp * 1000);
-        el.btnCopy.disabled = false;
+        startMachineCountdown(didKissme === "yes" ? (exp * 1000) : 0);
+        el.btnCopy.disabled = didKissme !== "yes";
 
         if (!silent) {
-          setStatus(
-            "Token generated.\n" +
-            "uid: " + st.uid + "\n" +
-            "key_id: " + keyId + "\n" +
-            "Use in CLI: /auth <token>",
-            "ok"
-          );
+          if (didKissme === "yes") {
+            setStatus(
+              "Signed token generated.\n" +
+              "uid: " + st.uid + "\n" +
+              "key_id: " + keyId + "\n" +
+              "did_kissme: yes\n" +
+              "Use in CLI input key (/auth <token>).",
+              "ok"
+            );
+          } else {
+            setStatus(
+              "did_kissme: no\n" +
+              "Countdown stays 00:00:00.\n" +
+              "CLI remains locked until answer is yes.",
+              "warn"
+            );
+          }
         }
       } catch (err) {
         if (!silent) setStatus("Token generation failed: " + err.message, "err");
@@ -565,7 +627,7 @@
       try {
         await navigator.clipboard.writeText(token);
         setStatus("Token copied.", "ok");
-      } catch (err) {
+      } catch (_err) {
         setStatus("Clipboard not available. Copy token manually.", "warn");
       }
     }
@@ -591,12 +653,17 @@
     });
 
     el.btnConnect.addEventListener("click", connect);
-    el.btnLogout.addEventListener("click", logout);
+    el.btnKissme.addEventListener("click", openKissme);
     el.btnCopy.addEventListener("click", copyToken);
     el.machineUid.addEventListener("change", async () => {
       if (st.uid) {
         await loadLastLease(st.uid);
         await generateToken(true);
+      }
+    });
+    el.didKissme.addEventListener("change", async () => {
+      if (st.uid) {
+        await generateToken(false);
       }
     });
 

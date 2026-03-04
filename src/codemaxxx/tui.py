@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import metadata as importlib_metadata
 import random
 from typing import Optional
 
@@ -34,6 +35,8 @@ LOGO = r"""
  \____\___/|____/|_____|_|  |_/_/   \_/_/\_\
 """
 LOGO_COMPACT = "CODEMAX"
+APP_BRAND = "Codemax"
+_APP_VERSION = ""
 
 console = Console(theme=THEME)
 
@@ -156,6 +159,17 @@ def _next_quip(pool: list[str]) -> str:
     return random.choice(pool)
 
 
+def _app_version_text() -> str:
+    global _APP_VERSION
+    if _APP_VERSION:
+        return _APP_VERSION
+    try:
+        _APP_VERSION = importlib_metadata.version("codemaxxx")
+    except importlib_metadata.PackageNotFoundError:
+        _APP_VERSION = "dev"
+    return _APP_VERSION
+
+
 def clear_status():
     """Stop the active loading/thinking spinner, if any."""
     global _STATUS
@@ -237,44 +251,61 @@ def print_header(model: str, host: str, workflow: str = "manus"):
     console.clear()
 
     width = _terminal_width()
-    top_pad = 0 if width < 64 else 1
+    height = max(20, int(console.size.height))
+    top_pad = 0 if width < 64 else max(1, min(10, height // 4))
     for _ in range(top_pad):
         console.print()
 
     logo_text = LOGO if width >= 62 else LOGO_COMPACT
     logo_style = "bold bright_white" if width >= 62 else "bold bright_cyan"
     console.print(Align.center(Text(logo_text, style=logo_style)))
-    console.print(Align.center(Text("by Eburon AI", style="dim")))
+    console.print(Align.center(Text(APP_BRAND, style="bold bright_cyan")))
     console.print()
 
 
 def _landing_shortcuts_line():
-    console.print()
     if _terminal_width() < 58:
         line1 = Text()
-        line1.append("ctrl+u", style="bold bright_white")
-        line1.append(" tab agents", style="dim")
+        line1.append("tab", style="bold bright_white")
+        line1.append(" agents", style="dim")
         line2 = Text()
-        line2.append("ctrl+i", style="bold bright_white")
+        line2.append("ctrl+p", style="bold bright_white")
         line2.append(" commands", style="dim")
         console.print(Align.center(line1))
         console.print(Align.center(line2))
-    else:
-        shortcuts = Text()
-        shortcuts.append("ctrl+u", style="bold bright_white")
-        shortcuts.append(" tab agents    ", style="dim")
-        shortcuts.append("ctrl+i", style="bold bright_white")
-        shortcuts.append(" commands", style="dim")
-        console.print(Align.center(shortcuts))
-    console.print()
+        return
+    shortcuts = Text()
+    shortcuts.append("tab", style="bold bright_white")
+    shortcuts.append(" agents    ", style="dim")
+    shortcuts.append("ctrl+p", style="bold bright_white")
+    shortcuts.append(" commands", style="dim")
+    console.print(Align.center(shortcuts))
+
+
+def _landing_tip_line():
+    tip = Text()
+    tip.append("● Tip ", style="bold bright_white")
+    tip.append("Run ", style="dim")
+    tip.append("/models", style="bold bright_white")
+    tip.append(" or ", style="dim")
+    tip.append("Ctrl+X M", style="bold bright_white")
+    tip.append(" to switch available AI models", style="dim")
+    console.print(Align.center(tip))
+
+
+def _landing_version_line():
+    width = _terminal_width()
+    left = "~"
+    right = _app_version_text()
+    pad = max(1, width - len(left) - len(right))
+    console.print(Text(left + (" " * pad) + right, style="dim"), no_wrap=True, overflow="crop")
 
 
 def print_prompt_footer():
-    """Render session metadata with a 3-line colored full-width separator."""
+    """Render session metadata with a 1-line colored full-width separator."""
     width = max(20, _terminal_width() - 1)
     gap = " " * width
-    for style in ("on bright_cyan", "on cyan", "on bright_blue"):
-        console.print(Text(gap, style=style), no_wrap=True, overflow="crop")
+    console.print(Text(gap, style="on cyan"), no_wrap=True, overflow="crop")
 
     workspace_cap = 26 if width < 72 else 46
     workspace = _truncate_middle(_SESSION_WORKSPACE, workspace_cap)
@@ -307,12 +338,12 @@ def print_prompt_footer():
 def input_first_prompt() -> str:
     """Render first-prompt clipped box style and collect user input."""
     terminal_w = _terminal_width()
-    width = min(78, max(22, terminal_w - 8))
+    width = min(96, max(26, terminal_w - 8))
     left_pad = max(0, (terminal_w - width) // 2)
     left = " " * left_pad
     cell_width = max(12, width - 2)
-    ask_line = 'Ask anything... "Fix broken tests"' if cell_width >= 32 else "Ask anything..."
-    automate_line = "AUTOMATE codemax" if cell_width >= 18 else "AUTOMATE"
+    ask_line = 'Ask anything... "Fix a TODO in the codebase"' if cell_width >= 44 else "Ask anything..."
+    automate_line = "AUTOMATE Codemax" if cell_width >= 20 else "AUTOMATE"
 
     def vrow(text: str = "") -> str:
         clipped = _fit_cell(text, cell_width)
@@ -325,7 +356,38 @@ def input_first_prompt() -> str:
     console.print(f"{left}┃")
     user_input = console.input(f"{left}┃  [green]❯[/green] ").strip()
     console.print(f"{left}╹" + ("▀" * width))
+    console.print()
     _landing_shortcuts_line()
+    console.print()
+    _landing_tip_line()
+    console.print()
+    _landing_version_line()
+    return user_input
+
+
+def input_main_prompt() -> str:
+    """Render main interactive prompt UI after the landing view."""
+    terminal_w = _terminal_width()
+    width = min(96, max(26, terminal_w - 8))
+    left_pad = max(0, (terminal_w - width) // 2)
+    left = " " * left_pad
+    cell_width = max(12, width - 2)
+    ask_line = 'Ask anything... "Fix a TODO in the codebase"' if cell_width >= 44 else "Ask anything..."
+    automate_line = "AUTOMATE Codemax" if cell_width >= 20 else "AUTOMATE"
+
+    def vrow(text: str = "") -> str:
+        clipped = _fit_cell(text, cell_width)
+        return f"{left}┃ {clipped}"
+
+    console.print()
+    console.print(f"{left}┃")
+    console.print(vrow(ask_line))
+    console.print(f"{left}┃")
+    console.print(vrow(automate_line))
+    console.print(f"{left}┃")
+    user_input = console.input(f"{left}┃  [green]❯[/green] ").strip()
+    console.print(f"{left}╹" + ("▀" * width))
+    print_prompt_footer()
     return user_input
 
 
@@ -347,7 +409,7 @@ def print_assistant_start():
     """Print assistant header."""
     clear_status()
     finish_stream()
-    console.print(Text("\n ◆ CodeMaxxx", style="brand"))
+    console.print(Text(f"\n ◆ {APP_BRAND}", style="brand"))
 
 
 def print_streamed_chunk(skill: str, chunk: str):
@@ -377,7 +439,7 @@ def print_assistant_md(content: str):
     console.print(
         Panel(
             Markdown(content),
-            title="[assistant]CodeMaxxx[/assistant]",
+            title=f"[assistant]{APP_BRAND}[/assistant]",
             border_style="bright_cyan",
             padding=(0, 1),
         )
@@ -398,7 +460,11 @@ def print_kissme_entry(
     body.append("[ KISS ME ]\n", style="bold bright_magenta")
     body.append("Run ", style="dim")
     body.append("/kissme", style="brand")
+    body.append(" or ", style="dim")
+    body.append("/connect", style="brand")
     body.append(" to connect.\n", style="dim")
+    body.append("Paste token: ", style="dim")
+    body.append("/auth <signed-token>\n", style="assistant")
     body.append("Portal: ", style="dim")
     body.append(portal + "\n", style="assistant")
     if machine_uid:
@@ -409,6 +475,51 @@ def print_kissme_entry(
         body.append(reason, style="error")
 
     console.print(Panel(body, title="[brand]KISSME[/brand]", border_style="bright_magenta", padding=(0, 1)))
+
+
+def input_kissme_key(
+    portal_url: str,
+    machine_uid: str = "",
+    reason: str = "",
+) -> str:
+    """Render KISSME lock component with machine id + connect + key input."""
+    clear_status()
+    finish_stream()
+
+    portal_raw = (portal_url or "").strip() or "auth.eburon.ai"
+    target = portal_raw if portal_raw.startswith(("http://", "https://")) else f"https://{portal_raw}"
+    if machine_uid:
+        joiner = "&" if "?" in target else "?"
+        target = f"{target}{joiner}machine_uid={machine_uid}"
+
+    content = Text()
+    content.append("KISSME authentication required\n", style="bold bright_magenta")
+    content.append("Generated Machine ID: ", style="dim")
+    content.append((machine_uid or "-") + "\n", style="assistant")
+    content.append("[ Connect ] ", style="bold bright_magenta")
+    content.append("type ", style="dim")
+    content.append("connect", style="brand")
+    content.append(" or ", style="dim")
+    content.append("/kissme", style="brand")
+    content.append("\n", style="dim")
+    content.append("Open browser (cmd+click): ", style="dim")
+    content.append(target + "\n", style="assistant")
+    if reason:
+        content.append("Status: ", style="dim")
+        content.append(reason + "\n", style="error")
+    content.append("Paste signed token from portal to continue.\n", style="dim")
+    content.append("Do not paste base64(machine_uid).\n", style="dim")
+    content.append("input key = ", style="brand")
+
+    console.print(
+        Panel(
+            content,
+            title="[brand]KISSME[/brand]",
+            border_style="bright_magenta",
+            padding=(0, 1),
+        )
+    )
+    return console.input("[bold bright_magenta]input key[/bold bright_magenta] = ").strip()
 
 
 def print_tool_call(name: str, args: dict):
@@ -466,8 +577,9 @@ def print_help():
         ("/agents", "Alias for /skills"),
         ("/copy-last", "Copy last assistant response to clipboard"),
         ("/copy <text>", "Copy custom text to clipboard"),
+        ("/connect", "Alias for /kissme"),
         ("/kissme", "Open KISSME auth portal in browser"),
-        ("/auth <base64-token>", "Authenticate and unlock model access"),
+        ("/auth <signed-token>", "Authenticate and unlock model access"),
         ("/auth-status", "Show current auth lease state"),
         ("/skills", "Show dedicated skill agents and model routing"),
         ("/skills-custom", "Show user-created custom skills"),
@@ -488,7 +600,7 @@ def print_help():
         ("/pick <n>", "Select a pending option and continue execution"),
         ("/clear", "Clear in-memory skill contexts"),
         ("/model <name>", "Set fallback model for skill routing"),
-        ("/quit", "Exit CodeMaxxx"),
+        ("/quit", f"Exit {APP_BRAND}"),
     ]
 
     if _terminal_width() < 80:

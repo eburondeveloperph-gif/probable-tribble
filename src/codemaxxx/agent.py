@@ -109,6 +109,7 @@ _ACTION_HINT_TOKENS = {
 _AUTH_ALLOWED_COMMANDS = {
     "/auth",
     "/auth-status",
+    "/connect",
     "/kissme",
     "/help",
     "/commands",
@@ -645,10 +646,11 @@ def _render_auth_required_md(status: AuthStatus, machine_uid: str = "") -> str:
         [
             "",
             "KISS ME:",
+            "- `/connect`",
             "- `/kissme`",
             "",
             "Paste token:",
-            "- `/auth <base64-token>`",
+            "- `/auth <signed-token>`",
             "",
             "Model access is disabled until authentication succeeds.",
         ]
@@ -744,6 +746,26 @@ def _quick_prompt_validation_response(user_msg: str) -> str:
         )
 
     return ""
+
+
+def _looks_like_auth_token(value: str) -> bool:
+    """Best-effort detection for pasted KISSME auth tokens."""
+    raw = (value or "").strip()
+    if not raw:
+        return False
+    if raw.lower().startswith("bearer "):
+        parts = raw.split(None, 1)
+        raw = parts[1].strip() if len(parts) > 1 else ""
+    if not raw:
+        return False
+
+    # JWT-like form.
+    if raw.count(".") == 2 and all(seg.strip() for seg in raw.split(".")):
+        return True
+
+    if len(raw) < 24:
+        return False
+    return bool(re.fullmatch(r"[A-Za-z0-9+/=_-]+", raw))
 
 
 def _is_build_like_request(user_msg: str) -> bool:
@@ -1078,12 +1100,6 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
     tui.set_kissme_countdown(auth_status.seconds_left if auth_status.authenticated else 0)
     if auth_status.authenticated:
         tui.print_info(f"🔐 Auth lease active ({_format_duration(auth_status.seconds_left)} remaining).")
-    else:
-        tui.print_kissme_entry(
-            portal_url=auth_status.portal_url,
-            machine_uid=machine_uid,
-            reason=auth_status.reason,
-        )
     kissme_lock_visible = not auth_status.authenticated
 
     async def _auth_status_monitor_loop():
@@ -1097,11 +1113,6 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                     kissme_lock_visible = False
                 else:
                     if not kissme_lock_visible:
-                        tui.print_kissme_entry(
-                            portal_url=current.portal_url,
-                            machine_uid=machine_uid,
-                            reason=current.reason,
-                        )
                         kissme_lock_visible = True
                 await asyncio.sleep(AUTH_STATUS_POLL_SECONDS)
             except asyncio.CancelledError:
@@ -1113,13 +1124,19 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
 
     try:
         while True:
+            auth_status = get_auth_status(machine_uid)
+            tui.set_kissme_countdown(auth_status.seconds_left if auth_status.authenticated else 0)
             try:
-                if first_prompt:
+                if not auth_status.authenticated:
+                    user_input = tui.input_kissme_key(
+                        portal_url=auth_status.portal_url,
+                        machine_uid=machine_uid,
+                        reason=auth_status.reason,
+                    ).strip()
+                elif first_prompt:
                     user_input = tui.input_first_prompt().strip()
                 else:
-                    tui.console.print()
-                    tui.print_prompt_footer()
-                    user_input = tui.console.input("[green]❯[/green] ").strip()
+                    user_input = tui.input_main_prompt().strip()
             except (EOFError, KeyboardInterrupt):
                 tui.console.print("\n[dim]Goodbye![/dim]")
                 break
@@ -1129,6 +1146,24 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
 
             first_prompt = False
             auth_status = get_auth_status(machine_uid)
+            tui.set_kissme_countdown(auth_status.seconds_left if auth_status.authenticated else 0)
+
+            if not auth_status.authenticated and not user_input.startswith("/"):
+                if user_input.strip().lower() in ("connect", "c"):
+                    ok, msg = _open_kissme_portal(
+                        portal_url=auth_status.portal_url,
+                        machine_uid=machine_uid,
+                    )
+                    if ok:
+                        tui.print_info(msg)
+                    else:
+                        tui.print_error(msg)
+                    continue
+                if _looks_like_auth_token(user_input):
+                    user_input = f"/auth {user_input}"
+                else:
+                    tui.print_info("Type `connect` to open auth page, then paste the signed token.")
+                    continue
 
             if pending_choice_options and re.fullmatch(r"\d{1,2}", user_input):
                 choice_num = user_input
@@ -1174,51 +1209,56 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                     parts = user_input.split(maxsplit=1)
                     token = parts[1].strip() if len(parts) > 1 else ""
                     if not token:
-                        token = tui.console.input("[yellow]Base64 token[/yellow] ❯ ").strip()
+                        token = tui.console.input("[yellow]input key[/yellow] = ").strip()
+                    if token:
+                        tui.update_status("KISSME connecting (2s)")
+                        await asyncio.sleep(1)
+                        tui.update_status("KISSME connecting (1s)")
+                        await asyncio.sleep(1)
+                        tui.clear_status()
                     ok, msg, updated = activate_base64_token(token, machine_uid)
                     auth_status = updated
                     tui.set_kissme_countdown(auth_status.seconds_left if auth_status.authenticated else 0)
                     if ok:
                         kissme_lock_visible = False
+                        tui.update_status("KISSME unlock ✦")
+                        await asyncio.sleep(0.35)
+                        tui.update_status("KISSME unlock ✦✦")
+                        await asyncio.sleep(0.35)
+                        tui.update_status("KISSME unlock ✦✦✦")
+                        await asyncio.sleep(0.35)
+                        tui.clear_status()
                         tui.print_info(msg)
-                        tui.print_assistant_md(_render_auth_status_md(auth_status, machine_uid=machine_uid))
+                        tui.print_info(
+                            f"Connected. Lease: {_format_duration(auth_status.seconds_left)} (expires in 24h max)."
+                        )
+                        tui.print_header(model=model, host=host, workflow=workflow)
+                        first_prompt = True
                     else:
                         kissme_lock_visible = True
                         tui.print_error(msg)
-                        tui.print_kissme_entry(
-                            portal_url=auth_status.portal_url,
-                            machine_uid=machine_uid,
-                            reason=auth_status.reason,
-                        )
                     continue
                 if cmd == "/auth-status":
                     auth_status = get_auth_status(machine_uid)
                     if auth_status.authenticated:
                         tui.print_assistant_md(_render_auth_status_md(auth_status, machine_uid=machine_uid))
                     else:
-                        tui.print_kissme_entry(
-                            portal_url=auth_status.portal_url,
-                            machine_uid=machine_uid,
-                            reason=auth_status.reason,
-                        )
+                        tui.print_info(f"KISSME required: {auth_status.reason}")
                     continue
-                if cmd == "/kissme":
+                if cmd in ("/kissme", "/connect"):
                     ok, msg = _open_kissme_portal(
                         portal_url=auth_status.portal_url,
                         machine_uid=machine_uid,
                     )
                     if ok:
                         tui.print_info(msg)
+                        tui.print_info("Authenticate in browser, then paste token into `input key =`.")
                     else:
                         tui.print_error(msg)
                     continue
                 if not auth_status.authenticated and cmd not in _AUTH_ALLOWED_COMMANDS:
                     kissme_lock_visible = True
-                    tui.print_kissme_entry(
-                        portal_url=auth_status.portal_url,
-                        machine_uid=machine_uid,
-                        reason=auth_status.reason,
-                    )
+                    tui.print_info(f"KISSME required: {auth_status.reason}")
                     continue
                 if cmd in ("/quit", "/exit", "/q"):
                     tui.console.print("[dim]Goodbye![/dim]")
@@ -1449,11 +1489,7 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                 auth_status = get_auth_status(machine_uid)
                 if not auth_status.authenticated:
                     kissme_lock_visible = True
-                    tui.print_kissme_entry(
-                        portal_url=auth_status.portal_url,
-                        machine_uid=machine_uid,
-                        reason=auth_status.reason,
-                    )
+                    tui.print_info(f"KISSME required: {auth_status.reason}")
                     continue
 
                 if not master_emilio_override and _requires_impl_confirmation(user_input):

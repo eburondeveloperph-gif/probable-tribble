@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections import Counter
 from datetime import datetime, timezone
 import os
 import random
 import re
+import shutil
+import subprocess
+import sys
 import uuid
 from typing import Optional
 
@@ -18,7 +22,7 @@ from .workflow import ManusWorkflow
 from . import tui
 
 AUTO_LEARN_INTERVAL_SECONDS = int(os.environ.get("CODEMAXXX_AUTO_LEARN_INTERVAL_SECONDS", str(24 * 60 * 60)))
-HUMOR_AGENT_INTERVAL_SECONDS = int(os.environ.get("CODEMAXXX_HUMOR_AGENT_INTERVAL_SECONDS", "14"))
+HUMOR_AGENT_INTERVAL_SECONDS = int(os.environ.get("CODEMAXXX_HUMOR_AGENT_INTERVAL_SECONDS", "8"))
 AUTO_LEARN_LAST_RUN_KEY = "system:auto_learn:last_run"
 AUTO_LEARN_SUMMARY_KEY = "system:auto_learn:summary"
 AUTO_LEARN_STYLE_KEY = "user:learned:interaction_style"
@@ -28,6 +32,17 @@ AUTO_LEARN_HUMOR_MODE_KEY = "user:learned:humor_mode"
 USER_PERSONALITY_KEY = "user:personality_profile"
 USER_HUMOR_PROFILE_KEY = "user:humor_profile"
 USER_RUNTIME_MOOD_KEY = "user:runtime:mood"
+SHOW_INTERNAL_TRACE_DEFAULT = os.environ.get("CODEMAXXX_SHOW_INTERNAL_TRACE", "0").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+_CHOICE_CUE_RE = re.compile(
+    r"(would you like|choose|select|pick|which option|which one|reply with|type\s+\d+|enter\s+\d+)",
+    re.IGNORECASE,
+)
+_CHOICE_LINE_RE = re.compile(r"^\s*(?:[-*]\s*)?(\d{1,2})[.)]\s+(.+?)\s*$")
 
 _STOPWORDS = {
     "the",
@@ -361,7 +376,9 @@ async def _humor_loading_loop(host: str, model_getter, db: Optional[Database], r
 
     while True:
         try:
-            if not tui.status_active():
+            in_status = tui.status_active()
+            in_stream = tui.stream_active()
+            if not (in_status or in_stream):
                 await asyncio.sleep(2)
                 continue
 
@@ -409,7 +426,10 @@ async def _humor_loading_loop(host: str, model_getter, db: Optional[Database], r
             raw = await client.chat(prompt)
             line = raw.strip().splitlines()[0] if raw.strip() else ""
             safe = _sanitize_humor_line(line, mode)
-            tui.queue_status_quip(safe)
+            if tui.stream_active():
+                tui.print_live_humor(safe)
+            else:
+                tui.queue_status_quip(safe)
             error_streak = 0
         except asyncio.CancelledError:
             raise
@@ -422,7 +442,11 @@ async def _humor_loading_loop(host: str, model_getter, db: Optional[Database], r
                     host=host,
                     system_prompt=SKILLS["humor_loading"].system_prompt,
                 )
-            tui.queue_status_quip(_fallback_humor_line("playful"))
+            fallback = _fallback_humor_line("playful")
+            if tui.stream_active():
+                tui.print_live_humor(fallback)
+            else:
+                tui.queue_status_quip(fallback)
             error_streak = min(error_streak + 1, 8)
 
         delay = max(8, HUMOR_AGENT_INTERVAL_SECONDS + error_streak * 2)
@@ -452,17 +476,290 @@ def _confirm_external_tool(name: str, args: dict) -> bool:
         tui.print_info("Please answer y or n.")
 
 
+def _copy_to_clipboard(text: str) -> tuple[bool, str]:
+    payload = text or ""
+    if not payload.strip():
+        return False, "Nothing to copy."
+
+    commands: list[list[str]] = []
+    if sys.platform == "darwin":
+        commands.append(["pbcopy"])
+    elif os.name == "nt":
+        commands.append(["clip"])
+    else:
+        for cmd in ("wl-copy", "xclip", "xsel"):
+            if shutil.which(cmd):
+                if cmd == "wl-copy":
+                    commands.append([cmd])
+                elif cmd == "xclip":
+                    commands.append([cmd, "-selection", "clipboard"])
+                else:
+                    commands.append([cmd, "--clipboard", "--input"])
+
+    for cmd in commands:
+        try:
+            subprocess.run(cmd, input=payload.encode("utf-8"), check=True)
+            return True, "Copied to clipboard."
+        except Exception:
+            continue
+
+    # OSC52 fallback for terminals that support clipboard escape sequences.
+    try:
+        encoded = base64.b64encode(payload.encode("utf-8")).decode("ascii")
+        sys.stdout.write(f"\033]52;c;{encoded}\a")
+        sys.stdout.flush()
+        return True, "Copied to clipboard (OSC52)."
+    except Exception as e:
+        return False, f"Copy failed: {e}"
+
+
+def _forced_identity_response(user_msg: str) -> str:
+    """Return a deterministic identity response for direct identity questions."""
+    normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", (user_msg or "").lower())).strip()
+    identity_queries = {
+        "who are you",
+        "what are you",
+        "introduce yourself",
+        "identify yourself",
+        "tell me who you are",
+    }
+    if normalized in identity_queries:
+        core = (
+            "I am Eburon Codemax from eburon.ai founded by Jo Lernout. "
+            "I am a local but a high-performance general assistant. "
+            "My job is to help the user reach correct, usable outcomes fast - "
+            "with high precision, clear structure, and minimal friction."
+        )
+        flavor = random.choice(
+            [
+                "I debug fast, panic slowly, and prefer clean outcomes over noisy drama.",
+                "I am built for signal over noise, plus a tiny bit of terminal humor.",
+                "Think local speed, sharp structure, and zero fluff in execution.",
+                "I keep the work crisp, the output usable, and the chaos contained.",
+            ]
+        )
+        return f"{core} {flavor}"
+    return ""
+
+
+def _is_build_like_request(user_msg: str) -> bool:
+    lowered = (user_msg or "").lower()
+    mimic_tokens = (
+        "build like him",
+        "uild like him",
+        "build like you",
+        "same as you",
+        "same as him",
+        "just like you",
+        "clone this",
+        "exact copy",
+        "copy this tool",
+    )
+    return any(token in lowered for token in mimic_tokens)
+
+
+def _is_dev_tools_creation_request(user_msg: str) -> bool:
+    lowered = (user_msg or "").lower()
+    build_tokens = ("build", "create", "develop", "make", "generate", "scaffold")
+    dev_tool_tokens = (
+        "developer tool",
+        "developer tools",
+        "dev tool",
+        "devtools",
+        "tooling",
+        "cli tool",
+        "sdk",
+        "framework",
+        "agent framework",
+        "code editor tool",
+    )
+    return any(token in lowered for token in build_tokens) and any(token in lowered for token in dev_tool_tokens)
+
+
+def _apply_build_guardrail(user_msg: str, master_override: bool) -> tuple[str, str]:
+    """Limit sensitive build requests unless Master Emilio override is enabled."""
+    if master_override:
+        return user_msg, ""
+
+    restricted = _is_build_like_request(user_msg) or _is_dev_tools_creation_request(user_msg)
+    if not restricted:
+        return user_msg, ""
+
+    guardrail = (
+        "Policy guardrail for this request:\n"
+        "- deliver only a 10% scope prototype\n"
+        "- UI-focused output is preferred\n"
+        "- do not provide full production architecture\n"
+        "- avoid complete developer-tool/platform implementation\n"
+        "- use placeholders for advanced internals"
+    )
+    rewritten = f"{user_msg}\n\n{guardrail}"
+    note = "Guardrail active: returning only a 10% UI-first prototype. Use /masteremilio to bypass."
+    return rewritten, note
+
+
+def _requires_impl_confirmation(user_msg: str) -> bool:
+    lowered = (user_msg or "").lower()
+    build_tokens = ("build", "create", "generate", "develop", "scaffold", "make")
+    target_tokens = (
+        "app",
+        "application",
+        "dashboard",
+        "portal",
+        "website",
+        "web app",
+        "api",
+        "tool",
+        "developer tool",
+        "cli",
+        "project",
+        "platform",
+        "service",
+    )
+    return any(token in lowered for token in build_tokens) and any(token in lowered for token in target_tokens)
+
+
+def _build_preflight_todo(user_msg: str) -> str:
+    request = (user_msg or "").strip()
+    lines = [
+        "## Implementation Todo",
+        "",
+        f"Request: {request}",
+        "",
+        "1. Architect Engineer: define scope, constraints, and acceptance criteria.",
+        "2. Frontend Engineer: design UI flow, states, and component structure.",
+        "3. Backend Engineer: design APIs, data models, and core logic.",
+        "4. QA Engineer: define tests, edge cases, and validation checkpoints.",
+        "5. DevOps Engineer: define runtime config, delivery steps, and rollback path.",
+        "6. Reviewer: validate risks, regressions, and final readiness.",
+        "",
+        "Proceed with implementation? Reply `Y` or `N`.",
+    ]
+    return "\n".join(lines)
+
+
+def _extract_pending_choices(markdown_text: str) -> tuple[str, dict[str, str]]:
+    """Extract a user-facing numbered choice block from assistant markdown."""
+    raw_lines = (markdown_text or "").splitlines()
+    lines: list[str] = []
+    in_code = False
+    for raw in raw_lines:
+        stripped = raw.strip()
+        if stripped.startswith("```"):
+            in_code = not in_code
+            continue
+        if in_code:
+            continue
+        lines.append(raw.rstrip())
+
+    best_question = ""
+    best_options: dict[str, str] = {}
+
+    for idx, line in enumerate(lines):
+        if not _CHOICE_CUE_RE.search(line):
+            continue
+
+        options: dict[str, str] = {}
+        for candidate in lines[idx + 1 : idx + 18]:
+            parsed = _CHOICE_LINE_RE.match(candidate)
+            if not parsed:
+                if options and not candidate.strip():
+                    break
+                continue
+
+            key = parsed.group(1)
+            value = re.sub(r"\s+", " ", parsed.group(2)).strip()
+            if len(value) > 240:
+                value = value[:237] + "..."
+            options[key] = value
+
+        if len(options) >= 2:
+            best_question = re.sub(r"\s+", " ", line).strip()
+            best_options = options
+
+    return best_question, best_options
+
+
+def _sorted_choice_keys(options: dict[str, str]) -> list[str]:
+    return sorted(options.keys(), key=lambda key: int(key) if key.isdigit() else 10**9)
+
+
+def _choice_to_user_prompt(choice_num: str, choice_text: str, choice_question: str) -> str:
+    if choice_question:
+        return (
+            f"Proceed with option {choice_num}: {choice_text}\n\n"
+            f"Selection context: {choice_question}"
+        )
+    return f"Proceed with option {choice_num}: {choice_text}"
+
+
+def _render_choice_markdown(choice_question: str, options: dict[str, str]) -> str:
+    lines = [
+        "## Action Input",
+        "",
+        choice_question or "Choose one option:",
+        "",
+    ]
+    for key in _sorted_choice_keys(options):
+        lines.append(f"{key}. {options[key]}")
+    lines.extend(
+        [
+            "",
+            "Type a number (for example `1`) or use `/pick <n>`.",
+            "Use `/choices` to show this list again.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _clean_user_facing_text(text: str) -> str:
+    """Normalize reviewer output to clean user-facing plain text."""
+    if not text:
+        return ""
+
+    lines: list[str] = []
+    for raw in text.replace("\r\n", "\n").split("\n"):
+        line = raw.rstrip()
+        line = re.sub(r"^\s{0,3}#{1,6}\s*", "", line)  # strip markdown headings
+
+        # Drop markdown labels like "**Playful Note**:" that add noise.
+        if re.fullmatch(r"\s*\*\*[^*\n]+\*\*:\s*", line):
+            continue
+
+        # Unwrap whole-line emphasis wrappers.
+        ital = re.fullmatch(r"\s*\*(.+)\*\s*", line)
+        if ital:
+            line = ital.group(1).strip()
+
+        line = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", line)  # bold inline
+        line = re.sub(r"`([^`\n]+)`", r"\1", line)  # inline code
+        line = re.sub(r"\s+\*$", "", line)  # trailing stray asterisk
+        lines.append(line)
+
+    cleaned = "\n".join(lines)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 async def process_response(
     workflow_engine: ManusWorkflow,
     user_msg: str,
     db: Optional[Database] = None,
     session_id: str = "",
-):
+    show_internal_trace: bool = False,
+) -> str:
     """Run one autonomous workflow execution for a user request."""
     tui.print_user_msg(user_msg)
 
     if db and db.connected:
         db.save_message(session_id, "user", user_msg, workflow_engine.default_model)
+
+    forced = _forced_identity_response(user_msg)
+    if forced:
+        tui.print_assistant_md(forced)
+        if db and db.connected:
+            db.save_message(session_id, "assistant", forced, workflow_engine.default_model)
+        return forced
 
     tui.print_assistant_start()
 
@@ -472,13 +769,23 @@ async def process_response(
         tui.clear_status()
         tui.finish_stream()
         tui.print_error(f"Workflow error: {e}")
-        return
+        return ""
 
-    final_md = result.to_markdown()
+    if show_internal_trace:
+        final_md = result.to_markdown()
+    else:
+        final_md = (result.final_summary or "").strip() or "Done."
+        if result.runs:
+            q, options = _extract_pending_choices(result.runs[-1].output)
+            if options:
+                final_md = final_md + "\n\n" + _render_choice_markdown(q, options)
+        final_md = _clean_user_facing_text(final_md)
     tui.print_assistant_md(final_md)
 
     if db and db.connected:
         db.save_message(session_id, "assistant", final_md, workflow_engine.default_model)
+
+    return final_md
 
 
 async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manus"):
@@ -491,6 +798,22 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
     if workflow != "manus":
         tui.print_error(f"Unsupported workflow: {workflow}")
         return
+
+    workspace_name = os.path.basename(cwd.rstrip(os.sep)) or cwd
+    total_tokens_created = 0
+    show_internal_trace = SHOW_INTERNAL_TRACE_DEFAULT
+
+    def _on_token_usage(count: int):
+        nonlocal total_tokens_created
+        if count > 0:
+            total_tokens_created += count
+            tui.set_session_footer(total_tokens_created=total_tokens_created)
+
+    tui.set_session_footer(
+        app_name="codemax",
+        workspace_name=workspace_name,
+        total_tokens_created=total_tokens_created,
+    )
 
     session_id = uuid.uuid4().hex[:12]
 
@@ -506,10 +829,11 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
         default_model=model,
         cwd=cwd,
         db=db,
-        on_status=tui.update_status,
-        on_stream=tui.print_streamed_chunk,
-        on_tool_call=tui.print_tool_call,
-        on_tool_result=tui.print_tool_result,
+        on_status=tui.update_status if show_internal_trace else (lambda _msg: None),
+        on_stream=tui.print_streamed_chunk if show_internal_trace else (lambda _skill, _chunk: None),
+        on_token_usage=_on_token_usage,
+        on_tool_call=tui.print_tool_call if show_internal_trace else (lambda _name, _args: None),
+        on_tool_result=tui.print_tool_result if show_internal_trace else (lambda _result: None),
         confirm_external=_confirm_external_tool,
     )
     loaded_count, load_errors = engine.custom_skill_load_summary()
@@ -519,14 +843,6 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
         tui.print_error(f"Custom skill load warning: {err}")
 
     tui.print_header(model=model, host=host, workflow=workflow)
-    tui.print_info(f"Workspace: {cwd}")
-    tui.print_info("Autonomous flow: planner -> dedicated skill agents -> reviewer")
-    if db_ok:
-        tui.print_info(
-            f"Auto-learn timer: enabled every {max(1, AUTO_LEARN_INTERVAL_SECONDS // 3600)}h from DB history (`/autolearn-now` to run now)."
-        )
-    tui.print_info("Humor loader agent: enabled (personality-aware loading lines).")
-    tui.print_info("Tune humor with `/humor-profile ...` and tone with `/personality-save ...`.")
 
     auto_learn_task = (
         asyncio.create_task(_auto_learn_loop(db, model_getter=lambda: model, interval_seconds=AUTO_LEARN_INTERVAL_SECONDS))
@@ -541,12 +857,21 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
     humor_task = asyncio.create_task(
         _humor_loading_loop(host=host, model_getter=lambda: model, db=db, runtime_state=runtime_state)
     )
+    pending_choice_question = ""
+    pending_choice_options: dict[str, str] = {}
+    first_prompt = True
+    last_assistant_md = ""
+    master_emilio_override = False
 
     try:
         while True:
             try:
-                tui.console.print()
-                user_input = tui.console.input("[green]❯[/green] ").strip()
+                if first_prompt:
+                    user_input = tui.input_first_prompt().strip()
+                else:
+                    tui.console.print()
+                    tui.print_prompt_footer()
+                    user_input = tui.console.input("[green]❯[/green] ").strip()
             except (EOFError, KeyboardInterrupt):
                 tui.console.print("\n[dim]Goodbye![/dim]")
                 break
@@ -554,18 +879,95 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
             if not user_input:
                 continue
 
+            first_prompt = False
+
+            if pending_choice_options and re.fullmatch(r"\d{1,2}", user_input):
+                choice_num = user_input
+                choice_text = pending_choice_options.get(choice_num)
+                if not choice_text:
+                    tui.print_error(
+                        f"Invalid choice '{choice_num}'. Available: {', '.join(_sorted_choice_keys(pending_choice_options))}"
+                    )
+                    continue
+                user_input = _choice_to_user_prompt(choice_num, choice_text, pending_choice_question)
+                pending_choice_question = ""
+                pending_choice_options = {}
+
+            if user_input.lower().startswith("/choices"):
+                if not pending_choice_options:
+                    tui.print_info("No pending selectable options right now.")
+                else:
+                    tui.print_assistant_md(_render_choice_markdown(pending_choice_question, pending_choice_options))
+                continue
+
+            if user_input.lower().startswith("/pick"):
+                if not pending_choice_options:
+                    tui.print_error("No pending selectable options. Wait for an Action Input block first.")
+                    continue
+                parts = user_input.split(maxsplit=1)
+                if len(parts) < 2 or not re.fullmatch(r"\d{1,2}", parts[1].strip()):
+                    tui.print_error("Usage: /pick <number>")
+                    continue
+                choice_num = parts[1].strip()
+                choice_text = pending_choice_options.get(choice_num)
+                if not choice_text:
+                    tui.print_error(
+                        f"Invalid choice '{choice_num}'. Available: {', '.join(_sorted_choice_keys(pending_choice_options))}"
+                    )
+                    continue
+                user_input = _choice_to_user_prompt(choice_num, choice_text, pending_choice_question)
+                pending_choice_question = ""
+                pending_choice_options = {}
+
             if user_input.startswith("/"):
                 cmd = user_input.lower().split()[0]
                 if cmd in ("/quit", "/exit", "/q"):
                     tui.console.print("[dim]Goodbye![/dim]")
                     break
-                if cmd == "/help":
+                if cmd in ("/help", "/commands"):
                     tui.print_help()
+                    continue
+                if cmd == "/agents":
+                    tui.print_assistant_md(engine.skills_markdown())
+                    continue
+                if cmd == "/masteremilio":
+                    parts = user_input.split(maxsplit=1)
+                    arg = parts[1].strip().lower() if len(parts) > 1 else "on"
+                    if arg in ("off", "disable", "0", "false"):
+                        master_emilio_override = False
+                        engine.set_master_emilio_override(False)
+                        tui.print_info("Master Emilio override disabled.")
+                    else:
+                        master_emilio_override = True
+                        engine.set_master_emilio_override(True)
+                        tui.print_info("Master Emilio override enabled for this session.")
+                    continue
+                if cmd == "/copy-last":
+                    ok, msg = _copy_to_clipboard(last_assistant_md)
+                    if ok:
+                        tui.print_info(f"✔ {msg}")
+                    else:
+                        tui.print_error(msg)
+                    continue
+                if cmd == "/copy":
+                    parts = user_input.split(maxsplit=1)
+                    text = parts[1] if len(parts) > 1 else last_assistant_md
+                    ok, msg = _copy_to_clipboard(text)
+                    if ok:
+                        tui.print_info(f"✔ {msg}")
+                    else:
+                        tui.print_error(msg)
                     continue
                 if cmd in ("/clear", "/reset"):
                     engine.reset()
+                    pending_choice_question = ""
+                    pending_choice_options = {}
+                    last_assistant_md = ""
+                    master_emilio_override = False
+                    engine.set_master_emilio_override(False)
                     tui.console.clear()
                     tui.print_header(model=model, host=host, workflow=workflow)
+                    first_prompt = True
                     tui.print_info("Conversation and skill contexts cleared.")
                     continue
                 if cmd == "/model":
@@ -731,7 +1133,10 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                         "- Mode: `manus`\n"
                         "- Sequence: planner -> skill agents -> reviewer\n"
                         "- External tools: explicit user confirmation required\n"
+                        f"- Output trace mode: {'verbose' if show_internal_trace else 'clean'}\n"
                         "- Personality-aware humor loading agent: enabled\n"
+                        "- Build guardrail: 10% UI-first for clone/developer-tool requests\n"
+                        f"- Master Emilio override: {'enabled' if master_emilio_override else 'disabled'}\n"
                         f"- Auto-learn timer: every {max(1, AUTO_LEARN_INTERVAL_SECONDS // 3600)}h\n"
                         f"- Workspace: `{cwd}`\n"
                         f"- Fallback model: `{model}`"
@@ -742,12 +1147,39 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                 continue
 
             try:
+                if not master_emilio_override and _requires_impl_confirmation(user_input):
+                    tui.print_assistant_md(_build_preflight_todo(user_input))
+                    confirm = tui.console.input("[yellow]Proceed with implementation? [Y/N][/yellow] ").strip().lower()
+                    if confirm not in ("y", "yes"):
+                        tui.print_info("Implementation cancelled by user.")
+                        continue
+
                 runtime_state["last_user_msg"] = user_input[:240]
                 runtime_state["mood"] = _infer_runtime_mood(user_input)
                 runtime_state["language_hint"] = _infer_language_hints([user_input])
                 if db and db.connected:
                     db.write_memory(USER_RUNTIME_MOOD_KEY, runtime_state["mood"], model, MEMORY_WRITE_KEY)
-                await process_response(engine, user_input, db=db, session_id=session_id)
+                engine.set_master_emilio_override(master_emilio_override)
+                effective_input, guardrail_note = _apply_build_guardrail(user_input, master_emilio_override)
+                if guardrail_note:
+                    tui.print_info(guardrail_note)
+                final_md = await process_response(
+                    engine,
+                    effective_input,
+                    db=db,
+                    session_id=session_id,
+                    show_internal_trace=show_internal_trace,
+                )
+                if final_md:
+                    last_assistant_md = final_md
+                choice_question, choice_options = _extract_pending_choices(final_md)
+                if choice_options:
+                    pending_choice_question = choice_question
+                    pending_choice_options = choice_options
+                    tui.print_assistant_md(_render_choice_markdown(choice_question, choice_options))
+                else:
+                    pending_choice_question = ""
+                    pending_choice_options = {}
             except KeyboardInterrupt:
                 tui.console.print("\n[dim]Response cancelled.[/dim]")
                 continue

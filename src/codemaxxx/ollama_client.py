@@ -49,6 +49,7 @@ class OllamaClient:
         self.host = host.rstrip("/")
         self.system_prompt = system_prompt
         self.messages: list[dict] = [{"role": "system", "content": system_prompt}]
+        self.last_eval_count: int = 0
 
     def add_message(self, role: str, content: str):
         self.messages.append({"role": role, "content": content})
@@ -56,6 +57,7 @@ class OllamaClient:
     async def chat_stream(self, user_msg: str) -> AsyncIterator[str]:
         """Send a message and yield streamed response chunks."""
         self.add_message("user", user_msg)
+        self.last_eval_count = 0
 
         payload = {
             "model": self.model,
@@ -87,6 +89,11 @@ class OllamaClient:
                         full_response.append(chunk)
                         yield chunk
                     if data.get("done"):
+                        eval_count = data.get("eval_count")
+                        try:
+                            self.last_eval_count = max(0, int(eval_count))
+                        except (TypeError, ValueError):
+                            self.last_eval_count = 0
                         break
 
         self.add_message("assistant", "".join(full_response))

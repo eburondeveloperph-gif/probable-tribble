@@ -33,6 +33,11 @@ from .tools import ToolResult, execute_tool
 
 TOOL_BLOCK_RE = re.compile(r"```tool\s*\n(.*?)\n```", re.DOTALL)
 JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*\n(\{.*?\})\n```", re.DOTALL)
+CHOICE_CUE_RE = re.compile(
+    r"(would you like|choose|select|pick|which option|which one|reply with|type\s+\d+|enter\s+\d+)",
+    re.IGNORECASE,
+)
+CHOICE_LINE_RE = re.compile(r"^\s*(?:[-*]\s*)?(\d{1,2})[.)]\s+(.+?)\s*$")
 MAX_PLAN_STEPS = 8
 MAX_TOOL_ROUNDS = 8
 
@@ -97,6 +102,7 @@ class ManusWorkflow:
         db=None,
         on_status: Optional[Callable[[str], None]] = None,
         on_stream: Optional[Callable[[str, str], None]] = None,
+        on_token_usage: Optional[Callable[[int], None]] = None,
         on_tool_call: Optional[Callable[[str, dict], None]] = None,
         on_tool_result: Optional[Callable[[ToolResult], None]] = None,
         confirm_external: Optional[Callable[[str, dict], bool]] = None,
@@ -107,9 +113,11 @@ class ManusWorkflow:
         self.db = db
         self._on_status = on_status or (lambda _msg: None)
         self._on_stream = on_stream or (lambda _skill, _chunk: None)
+        self._on_token_usage = on_token_usage or (lambda _count: None)
         self._on_tool_call = on_tool_call or (lambda _name, _args: None)
         self._on_tool_result = on_tool_result or (lambda _result: None)
         self._confirm_external = confirm_external or (lambda _name, _args: False)
+        self.master_emilio_override = False
 
         loaded, errors = load_custom_skills(cwd)
         self._custom_skill_load_errors = errors
@@ -143,6 +151,9 @@ class ManusWorkflow:
             self._skill_candidates[skill] = tuple(candidates)
             self._skill_model_index[skill] = 0
             self._skill_clients[skill] = self._new_client(skill, candidates[0])
+
+    def set_master_emilio_override(self, enabled: bool):
+        self.master_emilio_override = bool(enabled)
 
     def skills_markdown(self) -> str:
         lines = [
@@ -229,6 +240,7 @@ class ManusWorkflow:
         plan_steps = await self._build_plan(user_request, memory_context)
 
         runs: list[StepRun] = []
+        paused_for_action_input = False
         prior_context = memory_context
         exec_index = 1
         for idx, step in enumerate(plan_steps, 1):
@@ -242,6 +254,10 @@ class ManusWorkflow:
             runs.append(run)
             exec_index += 1
             prior_context = self._build_step_context(runs)
+
+            if self._has_pending_choices(run.output):
+                paused_for_action_input = True
+                break
 
             if not run.success and "self_heal" in SKILLS:
                 heal_task = (
@@ -261,6 +277,22 @@ class ManusWorkflow:
                 runs.append(heal_run)
                 exec_index += 1
                 prior_context = self._build_step_context(runs)
+
+                if self._has_pending_choices(heal_run.output):
+                    paused_for_action_input = True
+                    break
+
+        if paused_for_action_input:
+            self._on_status("done")
+            return WorkflowResult(
+                user_request=user_request,
+                plan_steps=plan_steps,
+                runs=runs,
+                final_summary=(
+                    "Paused for action input. Select one option using `1`, `2`, etc. "
+                    "or `/pick <n>`, then continue."
+                ),
+            )
 
         self._on_status("reviewing")
         final_summary = await self._final_review(user_request, plan_steps, runs)
@@ -290,7 +322,63 @@ class ManusWorkflow:
             chunks.append(f"Step {run.index} [{run.skill}] {run.task}\n{run.output[:1000]}")
         return "\n\n".join(chunks)
 
+    def _has_pending_choices(self, text: str) -> bool:
+        lines: list[str] = []
+        in_code_block = False
+        for raw in (text or "").splitlines():
+            stripped = raw.strip()
+            if stripped.startswith("```"):
+                in_code_block = not in_code_block
+                continue
+            if in_code_block:
+                continue
+            lines.append(raw.rstrip())
+
+        for idx, line in enumerate(lines):
+            if not CHOICE_CUE_RE.search(line):
+                continue
+            count = 0
+            for candidate in lines[idx + 1 : idx + 20]:
+                if CHOICE_LINE_RE.match(candidate):
+                    count += 1
+                    continue
+                if count >= 2 and not candidate.strip():
+                    break
+            if count >= 2:
+                return True
+        return False
+
+    def _is_code_generation_or_app_request(self, user_request: str) -> bool:
+        lowered = (user_request or "").lower()
+        build_tokens = ("build", "create", "generate", "develop", "scaffold", "make")
+        target_tokens = (
+            "app",
+            "application",
+            "dashboard",
+            "portal",
+            "website",
+            "web app",
+            "api",
+            "tool",
+            "developer tool",
+            "cli",
+            "project",
+            "platform",
+            "service",
+        )
+        return any(token in lowered for token in build_tokens) and any(token in lowered for token in target_tokens)
+
     async def _build_plan(self, user_request: str, memory_context: str) -> list[PlanStep]:
+        if not self.master_emilio_override and self._is_code_generation_or_app_request(user_request):
+            return [
+                PlanStep("se_architect", f"Define architecture and execution plan for: {user_request}"),
+                PlanStep("se_frontend", f"Implement UI/front-end scope for: {user_request}"),
+                PlanStep("se_backend", f"Implement backend/API/data scope for: {user_request}"),
+                PlanStep("se_qa", f"Validate behavior and test coverage for: {user_request}"),
+                PlanStep("se_devops", f"Prepare runtime/deployment reliability steps for: {user_request}"),
+                PlanStep("reviewer", "Review final result, highlight risks, and next actions."),
+            ]
+
         available_skills = "|".join(sorted(SKILLS.keys()))
         planning_task = (
             "Create an execution plan as strict JSON only.\n"
@@ -471,7 +559,15 @@ class ManusWorkflow:
                 async for chunk in client.chat_stream(prompt):
                     chunks.append(chunk)
                     self._on_stream(skill, chunk)
-                return "".join(chunks)
+                response = "".join(chunks)
+                token_count = getattr(client, "last_eval_count", 0)
+                if not isinstance(token_count, int):
+                    token_count = 0
+                if token_count <= 0 and response:
+                    token_count = len(re.findall(r"\S+", response))
+                if token_count > 0:
+                    self._on_token_usage(token_count)
+                return response
             except Exception as exc:
                 message = str(exc).lower()
                 if "not found" not in message and "model" not in message:

@@ -14,6 +14,7 @@ BASE_MODELS: dict[str, float] = {
     "codemax-beta:latest": 6.6,
     "codemax-open:latest": 5.2,
     "codemax-codex:latest": 6.0,
+    "qwen3.5:9b": 9.0,
 }
 
 MAX_AGENT_MODEL_GB = 6.6
@@ -255,6 +256,41 @@ MODEL_VARIANTS: dict[str, ModelVariant] = {
         6.6,
         "Fallback humor loading alias",
     ),
+    "ebr_se_architect_qwen": ModelVariant(
+        "ebr_se_architect_qwen",
+        "ebr-se-architect:latest",
+        "qwen3.5:9b",
+        9.0,
+        "Software engineer architect alias",
+    ),
+    "ebr_se_frontend_qwen": ModelVariant(
+        "ebr_se_frontend_qwen",
+        "ebr-se-frontend:latest",
+        "qwen3.5:9b",
+        9.0,
+        "Software engineer frontend alias",
+    ),
+    "ebr_se_backend_qwen": ModelVariant(
+        "ebr_se_backend_qwen",
+        "ebr-se-backend:latest",
+        "qwen3.5:9b",
+        9.0,
+        "Software engineer backend alias",
+    ),
+    "ebr_se_qa_qwen": ModelVariant(
+        "ebr_se_qa_qwen",
+        "ebr-se-qa:latest",
+        "qwen3.5:9b",
+        9.0,
+        "Software engineer QA alias",
+    ),
+    "ebr_se_devops_qwen": ModelVariant(
+        "ebr_se_devops_qwen",
+        "ebr-se-devops:latest",
+        "qwen3.5:9b",
+        9.0,
+        "Software engineer DevOps alias",
+    ),
 }
 
 
@@ -317,6 +353,66 @@ SKILLS: dict[str, SkillSpec] = {
             "You are EBR Coding Agent. Ship working code with precise edits and no unnecessary refactors. "
             f"{UNCENSORED_RULES} "
             "Prefer deterministic fixes, preserve behavior unless told otherwise, and avoid hand-wavy output. "
+            f"{TOOL_FORMAT}"
+        ),
+    ),
+    "se_architect": SkillSpec(
+        name="se_architect",
+        description="Software architect engineer for solution design and decomposition.",
+        variants=("ebr_se_architect_qwen",),
+        tools=("list_dir", "glob", "grep", "read_file", "recall_memory"),
+        system_prompt=(
+            "You are EBR Software Architect Engineer. Define implementation architecture, boundaries, and sequencing. "
+            f"{UNCENSORED_RULES} "
+            "Focus on executable structure, interfaces, risks, and acceptance criteria. "
+            f"{TOOL_FORMAT}"
+        ),
+    ),
+    "se_frontend": SkillSpec(
+        name="se_frontend",
+        description="Frontend software engineer for UI implementation and UX behavior.",
+        variants=("ebr_se_frontend_qwen",),
+        tools=("read_file", "write_file", "edit_file", "glob", "grep", "list_dir"),
+        system_prompt=(
+            "You are EBR Frontend Software Engineer. Implement UI behavior with accessible, testable components. "
+            f"{UNCENSORED_RULES} "
+            "Prioritize clear interaction flows, responsive layout, and maintainable styling. "
+            f"{TOOL_FORMAT}"
+        ),
+    ),
+    "se_backend": SkillSpec(
+        name="se_backend",
+        description="Backend software engineer for APIs, data flow, and business logic.",
+        variants=("ebr_se_backend_qwen",),
+        tools=("read_file", "write_file", "edit_file", "glob", "grep", "list_dir", "shell"),
+        system_prompt=(
+            "You are EBR Backend Software Engineer. Implement backend logic, APIs, and data handling safely. "
+            f"{UNCENSORED_RULES} "
+            "Prefer explicit contracts, predictable behavior, and robust error handling. "
+            f"{TOOL_FORMAT}"
+        ),
+    ),
+    "se_qa": SkillSpec(
+        name="se_qa",
+        description="QA software engineer for validation, tests, and defect detection.",
+        variants=("ebr_se_qa_qwen",),
+        tools=("shell", "git", "read_file", "glob", "grep", "list_dir"),
+        system_prompt=(
+            "You are EBR QA Software Engineer. Validate implementation with concrete tests and defect analysis. "
+            f"{UNCENSORED_RULES} "
+            "Report exact pass/fail evidence and remaining risk with reproducible steps. "
+            f"{TOOL_FORMAT}"
+        ),
+    ),
+    "se_devops": SkillSpec(
+        name="se_devops",
+        description="DevOps software engineer for packaging, deployment, and runtime reliability.",
+        variants=("ebr_se_devops_qwen",),
+        tools=("shell", "git", "read_file", "write_file", "edit_file", "glob", "list_dir"),
+        system_prompt=(
+            "You are EBR DevOps Software Engineer. Handle runtime configuration, automation, and delivery safety. "
+            f"{UNCENSORED_RULES} "
+            "Prefer reproducible commands, rollback-aware changes, and operational clarity. "
             f"{TOOL_FORMAT}"
         ),
     ),

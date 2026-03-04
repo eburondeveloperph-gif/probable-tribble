@@ -154,8 +154,9 @@ usage() {
 
   Usage:
     codemaxxx               Full bootstrap + launch
+    codemaxxx tui            Launch CodeMaxxx TUI agent (interactive)
     codemaxxx install       Install Ollama, pull model, install OpenCode
-    codemaxxx launch        Quick launch (skip install steps)
+    codemaxxx launch        Quick launch via ollama launch
     codemaxxx pull          Pull / update the model only
     codemaxxx help          Show this message
 
@@ -172,6 +173,18 @@ case "${1:-}" in
     pull_model
     install_opencode
     ok "All done — run 'codemaxxx launch' to start."
+    ;;
+  tui|agent)
+    step "Launching CodeMaxxx TUI Agent"
+    SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+    if [[ -f "${SCRIPT_DIR}/.venv/bin/python" ]]; then
+      exec "${SCRIPT_DIR}/.venv/bin/python" -m codemaxxx.main "$@"
+    elif [[ -f "${HOME}/.codemaxxx/.venv/bin/python" ]]; then
+      exec "${HOME}/.codemaxxx/.venv/bin/python" -m codemaxxx.main "$@"
+    else
+      err "Python venv not found — run 'codemaxxx install' first"
+      exit 1
+    fi
     ;;
   launch)
     launch

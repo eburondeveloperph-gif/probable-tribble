@@ -59,6 +59,19 @@ if ! grep -q 'source "$HOME/.zsh/eburon_bootstrap.zsh"' "${ZSHRC}" 2>/dev/null; 
 fi
 ok "codemaxxx CLI installed"
 
+# ── 0b. Set up Python TUI agent ───────────────────────────────────
+info "Setting up CodeMaxxx TUI agent (Python)..."
+if command -v python3 >/dev/null 2>&1; then
+  if [[ ! -d "${INSTALL_DIR}/.venv" ]]; then
+    python3 -m venv "${INSTALL_DIR}/.venv"
+  fi
+  "${INSTALL_DIR}/.venv/bin/pip" install --quiet -e "${INSTALL_DIR}" 2>/dev/null || \
+  "${INSTALL_DIR}/.venv/bin/pip" install --quiet -r "${INSTALL_DIR}/requirements.txt" 2>/dev/null || true
+  ok "TUI agent ready (run: codemaxxx tui)"
+else
+  warn "python3 not found — TUI agent skipped (install Python 3.10+)"
+fi
+
 # ── 1. Ollama ──────────────────────────────────────────────────────
 info "[1/4] Installing / updating Ollama..."
 if command -v brew >/dev/null 2>&1; then

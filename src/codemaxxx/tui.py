@@ -45,6 +45,7 @@ _MAX_DYNAMIC_STATUS_QUIPS = 32
 _SESSION_APP_NAME = "codemax"
 _SESSION_WORKSPACE = "."
 _SESSION_TOTAL_TOKENS = 0
+_SESSION_KISSME_SECONDS = 0
 
 HUMOROUS_THINKING = [
     "consulting the rubber duck council 🦆",
@@ -92,6 +93,23 @@ def set_session_footer(
             _SESSION_TOTAL_TOKENS = max(0, int(total_tokens_created))
         except (TypeError, ValueError):
             _SESSION_TOTAL_TOKENS = 0
+
+
+def set_kissme_countdown(seconds_left: int):
+    """Update auth countdown shown in prompt footer."""
+    global _SESSION_KISSME_SECONDS
+    try:
+        _SESSION_KISSME_SECONDS = max(0, int(seconds_left))
+    except (TypeError, ValueError):
+        _SESSION_KISSME_SECONDS = 0
+
+
+def _format_hms(total_seconds: int) -> str:
+    sec = max(0, int(total_seconds))
+    h = sec // 3600
+    m = (sec % 3600) // 60
+    s = sec % 60
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
 def _session_meta_text() -> str:
@@ -269,6 +287,8 @@ def print_prompt_footer():
         line2 = Text()
         line2.append("/total tokens created ", style="dim")
         line2.append(f"{_SESSION_TOTAL_TOKENS:,}", style="brand")
+        line2.append(" /kissme ", style="dim")
+        line2.append(_format_hms(_SESSION_KISSME_SECONDS), style="assistant")
         console.print(line1)
         console.print(line2)
         return
@@ -279,6 +299,8 @@ def print_prompt_footer():
     line.append(workspace, style="assistant")
     line.append(" /total tokens created ", style="dim")
     line.append(f"{_SESSION_TOTAL_TOKENS:,}", style="brand")
+    line.append(" /kissme ", style="dim")
+    line.append(_format_hms(_SESSION_KISSME_SECONDS), style="assistant")
     console.print(line)
 
 
@@ -417,6 +439,7 @@ def print_help():
         ("/agents", "Alias for /skills"),
         ("/copy-last", "Copy last assistant response to clipboard"),
         ("/copy <text>", "Copy custom text to clipboard"),
+        ("/kissme", "Open KISSME auth portal in browser"),
         ("/auth <base64-token>", "Authenticate and unlock model access"),
         ("/auth-status", "Show current auth lease state"),
         ("/skills", "Show dedicated skill agents and model routing"),

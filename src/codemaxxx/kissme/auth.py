@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 AUTH_TOKEN_URL = os.environ.get("CODEMAXXX_AUTH_TOKEN_URL", "https://auth.eburon.ai/token")
+AUTH_PORTAL_URL = os.environ.get("CODEMAXXX_AUTH_PORTAL_URL", "auth.eburon.ai")
 AUTH_TTL_SECONDS = max(
     300,
     int(os.environ.get("CODEMAXXX_AUTH_TTL_SECONDS", str(24 * 60 * 60))),
@@ -34,6 +35,7 @@ class AuthStatus:
     authenticated: bool
     reason: str
     token_url: str
+    portal_url: str
     expires_at: Optional[datetime]
     seconds_left: int
     ssh_key_path: str
@@ -199,6 +201,7 @@ def get_auth_status(machine_uid: str) -> AuthStatus:
             authenticated=False,
             reason="No SSH public key found. Create one in ~/.ssh and request a token.",
             token_url=AUTH_TOKEN_URL,
+            portal_url=AUTH_PORTAL_URL,
             expires_at=None,
             seconds_left=0,
             ssh_key_path="",
@@ -212,6 +215,7 @@ def get_auth_status(machine_uid: str) -> AuthStatus:
             authenticated=False,
             reason="No active auth lease found.",
             token_url=AUTH_TOKEN_URL,
+            portal_url=AUTH_PORTAL_URL,
             expires_at=None,
             seconds_left=0,
             ssh_key_path=key_path,
@@ -224,6 +228,7 @@ def get_auth_status(machine_uid: str) -> AuthStatus:
             authenticated=False,
             reason="Auth lease machine mismatch.",
             token_url=AUTH_TOKEN_URL,
+            portal_url=AUTH_PORTAL_URL,
             expires_at=None,
             seconds_left=0,
             ssh_key_path=key_path,
@@ -236,6 +241,7 @@ def get_auth_status(machine_uid: str) -> AuthStatus:
             authenticated=False,
             reason="SSH fingerprint mismatch. Request a new token for this machine key.",
             token_url=AUTH_TOKEN_URL,
+            portal_url=AUTH_PORTAL_URL,
             expires_at=None,
             seconds_left=0,
             ssh_key_path=key_path,
@@ -248,6 +254,7 @@ def get_auth_status(machine_uid: str) -> AuthStatus:
             authenticated=False,
             reason="Auth lease is invalid (missing expiry).",
             token_url=AUTH_TOKEN_URL,
+            portal_url=AUTH_PORTAL_URL,
             expires_at=None,
             seconds_left=0,
             ssh_key_path=key_path,
@@ -260,6 +267,7 @@ def get_auth_status(machine_uid: str) -> AuthStatus:
             authenticated=False,
             reason="Auth lease expired. Re-authentication required.",
             token_url=AUTH_TOKEN_URL,
+            portal_url=AUTH_PORTAL_URL,
             expires_at=expires_at,
             seconds_left=0,
             ssh_key_path=key_path,
@@ -270,6 +278,7 @@ def get_auth_status(machine_uid: str) -> AuthStatus:
         authenticated=True,
         reason="ok",
         token_url=AUTH_TOKEN_URL,
+        portal_url=AUTH_PORTAL_URL,
         expires_at=expires_at,
         seconds_left=seconds_left,
         ssh_key_path=key_path,
@@ -297,10 +306,20 @@ def activate_base64_token(token: str, machine_uid: str) -> tuple[bool, str, Auth
         status = get_auth_status(machine_uid)
         return False, "Token machine does not match this machine.", status
 
+    token_uid = _first_present(payload, ("uid", "user_uid", "firebase_uid"))
+    if not token_uid:
+        status = get_auth_status(machine_uid)
+        return False, "Token missing user UID.", status
+
     token_fp = _first_present(payload, ("ssh_fingerprint", "ssh_fp", "fingerprint"))
     if token_fp and token_fp != fingerprint:
         status = get_auth_status(machine_uid)
         return False, "Token SSH fingerprint mismatch for this machine key.", status
+
+    token_secret = _first_present(payload, ("kissme_secret", "secret_code", "secret"))
+    if len(token_secret) < 8:
+        status = get_auth_status(machine_uid)
+        return False, "Token missing valid KISSME secret code.", status
 
     expires_at = _parse_expiry(
         payload.get("exp")
@@ -320,8 +339,10 @@ def activate_base64_token(token: str, machine_uid: str) -> tuple[bool, str, Auth
 
     lease_payload = {
         "issuer": _first_present(payload, ("issuer", "iss")) or "auth.eburon.ai",
+        "uid": token_uid,
         "machine_uid": machine_uid,
         "ssh_fingerprint": fingerprint,
+        "kissme_secret": token_secret,
         "ssh_key_path": key_path,
         "issued_at": _to_iso(now),
         "expires_at": _to_iso(expires_at),
@@ -334,4 +355,3 @@ def activate_base64_token(token: str, machine_uid: str) -> tuple[bool, str, Auth
     status = get_auth_status(machine_uid)
     minutes = max(1, int(status.seconds_left // 60))
     return True, f"Authenticated. Lease valid for {minutes} minutes.", status
-

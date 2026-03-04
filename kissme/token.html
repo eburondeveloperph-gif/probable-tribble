@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KISSME Auth | Eburon</title>
+  <style>
+    :root {
+      --bg: #0b0f1c;
+      --panel: #12182c;
+      --line: #273152;
+      --text: #e6ecff;
+      --muted: #93a4d1;
+      --accent: #39c7ff;
+      --ok: #2dd4bf;
+      --warn: #fbbf24;
+      --err: #ff7a91;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background: radial-gradient(1000px 600px at -10% -20%, #1c2750 0%, var(--bg) 65%);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      padding: 16px;
+    }
+
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .card {
+      background: linear-gradient(180deg, #131b34 0%, #0f162d 100%);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+    }
+
+    h1, h2 { margin: 0 0 10px; }
+    h1 { font-size: 24px; }
+    h2 { font-size: 15px; color: var(--accent); }
+
+    p, li { margin: 8px 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
+
+    .field { margin: 10px 0; }
+
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    input, textarea {
+      width: 100%;
+      background: #0a1228;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font: inherit;
+      font-size: 13px;
+      padding: 10px 11px;
+    }
+
+    textarea { min-height: 100px; resize: vertical; }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 8px;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: #102149;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    button.primary {
+      border-color: #1b7ea6;
+      background: linear-gradient(180deg, #1896c7 0%, #106985 100%);
+      color: #ecfeff;
+    }
+
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .status {
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 12px;
+      white-space: pre-wrap;
+      color: var(--muted);
+      background: #0b1327;
+    }
+
+    .status.ok { border-color: #1d6b65; color: #b5fff5; }
+    .status.warn { border-color: #8f6618; color: #ffe7aa; }
+    .status.err { border-color: #8a3242; color: #ffd7df; }
+
+    .pill {
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: #bff6ff;
+      background: rgba(57, 199, 255, 0.1);
+    }
+
+    .mono {
+      margin: 0;
+      background: #0a1228;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 12px;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .k { color: var(--muted); min-width: 130px; display: inline-block; }
+
+    @media (max-width: 900px) {
+      .wrap { grid-template-columns: 1fr; }
+      body { padding: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="card">
+      <h1>KISSME Auth</h1>
+      <p>Use Google or Email auth, then issue a base64 token for the CodeMaxxx CLI.</p>
+      <p><span class="pill" id="badge">Auth: not signed in</span></p>
+
+      <h2>1) Sign In</h2>
+      <div class="btns">
+        <button id="btnGoogle" class="primary">Sign In With Google</button>
+        <button id="btnLogout">Logout</button>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" type="email" placeholder="you@example.com" />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" type="password" placeholder="at least 6 chars" />
+        </div>
+      </div>
+      <div class="btns">
+        <button id="btnRegister">Register Email</button>
+        <button id="btnLogin">Login Email</button>
+      </div>
+
+      <h2 style="margin-top:14px;">2) Issue Token</h2>
+      <div class="field">
+        <label for="machineUid">Machine UID (from CLI)</label>
+        <input id="machineUid" type="text" placeholder="32-char machine uid" />
+      </div>
+      <div class="field">
+        <label for="sshFp">SSH Fingerprint (from CLI)</label>
+        <input id="sshFp" type="text" placeholder="SHA256:..." />
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="leaseHours">Lease Hours (max 24)</label>
+          <input id="leaseHours" type="number" min="1" max="24" value="24" />
+        </div>
+        <div class="field">
+          <label for="note">Note</label>
+          <input id="note" type="text" placeholder="new or returning" />
+        </div>
+      </div>
+      <div class="btns">
+        <button id="btnGenerate" class="primary" disabled>Generate Base64 Token</button>
+        <button id="btnCopy" disabled>Copy Token</button>
+      </div>
+
+      <div id="status" class="status">Waiting for authentication...</div>
+
+      <div class="field" style="margin-top:12px;">
+        <label for="tokenOut">Token Output (use in CLI: /auth &lt;token&gt;)</label>
+        <textarea id="tokenOut" readonly></textarea>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Session Pairing</h2>
+      <p><span class="k">UID:</span><span id="uidText">-</span></p>
+      <p><span class="k">Provider:</span><span id="providerText">-</span></p>
+      <p><span class="k">Returning User:</span><span id="returningText">-</span></p>
+      <p><span class="k">Session Secret:</span><span id="secretText">-</span></p>
+      <p><span class="k">Secret Issued:</span><span id="secretIssuedText">-</span></p>
+
+      <h2 style="margin-top:14px;">Last Lease</h2>
+      <pre id="leaseBox" class="mono">No lease yet.</pre>
+
+      <h2 style="margin-top:14px;">DB Paths</h2>
+      <ul>
+        <li><code>kissme_auth_users/&lt;uid&gt;/profile</code></li>
+        <li><code>kissme_auth_users/&lt;uid&gt;/sessions/&lt;session_id&gt;</code></li>
+        <li><code>kissme_auth_users/&lt;uid&gt;/leases/&lt;key_id&gt;</code></li>
+      </ul>
+    </section>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
+  <script>
+    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+    const firebaseConfig = {
+      apiKey: "AIzaSyB2j-StB_bC9xbsgifFNkM3VIyDGJmZ7rQ",
+      authDomain: "impactful-ring-469323-e5.firebaseapp.com",
+      databaseURL: "https://impactful-ring-469323-e5-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "impactful-ring-469323-e5",
+      storageBucket: "impactful-ring-469323-e5.firebasestorage.app",
+      messagingSenderId: "316842561818",
+      appId: "1:316842561818:web:73f633b1c6d2ecde2c5ca3",
+      measurementId: "G-Z0CW9R9G1J"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.database();
+
+    const st = {
+      uid: "",
+      provider: "",
+      returning: false,
+      sessionSecret: "",
+      sessionSecretIssuedAtMs: 0,
+      token: "",
+      lastLease: null
+    };
+
+    const el = {
+      badge: document.getElementById("badge"),
+      email: document.getElementById("email"),
+      password: document.getElementById("password"),
+      machineUid: document.getElementById("machineUid"),
+      sshFp: document.getElementById("sshFp"),
+      leaseHours: document.getElementById("leaseHours"),
+      note: document.getElementById("note"),
+      status: document.getElementById("status"),
+      tokenOut: document.getElementById("tokenOut"),
+      uidText: document.getElementById("uidText"),
+      providerText: document.getElementById("providerText"),
+      returningText: document.getElementById("returningText"),
+      secretText: document.getElementById("secretText"),
+      secretIssuedText: document.getElementById("secretIssuedText"),
+      leaseBox: document.getElementById("leaseBox"),
+      btnGoogle: document.getElementById("btnGoogle"),
+      btnRegister: document.getElementById("btnRegister"),
+      btnLogin: document.getElementById("btnLogin"),
+      btnLogout: document.getElementById("btnLogout"),
+      btnGenerate: document.getElementById("btnGenerate"),
+      btnCopy: document.getElementById("btnCopy")
+    };
+
+    function setStatus(message, mode) {
+      el.status.className = "status";
+      if (mode) el.status.classList.add(mode);
+      el.status.textContent = message;
+    }
+
+    function nowIso(ms) {
+      return new Date(ms).toISOString();
+    }
+
+    function randomHex(bytes = 16) {
+      const arr = new Uint8Array(bytes);
+      crypto.getRandomValues(arr);
+      return Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    function randomSecret() {
+      return "KMS-" + randomHex(12);
+    }
+
+    function clampHours(v) {
+      let n = parseInt(String(v || "24"), 10);
+      if (!Number.isFinite(n)) n = 24;
+      if (n < 1) n = 1;
+      if (n > 24) n = 24;
+      return n;
+    }
+
+    function b64Json(obj) {
+      const json = JSON.stringify(obj);
+      const bytes = new TextEncoder().encode(json);
+      let bin = "";
+      for (const b of bytes) bin += String.fromCharCode(b);
+      return btoa(bin);
+    }
+
+    function providerName(user) {
+      const id = (user.providerData && user.providerData[0] && user.providerData[0].providerId) || "password";
+      if (id === "google.com") return "google";
+      if (id === "password") return "email";
+      return id || "unknown";
+    }
+
+    async function createSessionSecret(uid, provider) {
+      const secret = randomSecret();
+      const nowMs = Date.now();
+      const sid = randomHex(10);
+      const rec = {
+        session_id: sid,
+        uid,
+        provider,
+        secret_code: secret,
+        issuedAtMs: nowMs,
+        issuedAtIso: nowIso(nowMs)
+      };
+      await db.ref("kissme_auth_users/" + uid + "/sessions/" + sid).set(rec);
+      await db.ref("kissme_auth_users/" + uid + "/profile").update({
+        uid,
+        provider,
+        currentSecret: secret,
+        currentSecretIssuedAtMs: nowMs,
+        currentSecretIssuedAtIso: nowIso(nowMs),
+        lastSeenAtMs: nowMs,
+        lastSeenAtIso: nowIso(nowMs)
+      });
+      st.sessionSecret = secret;
+      st.sessionSecretIssuedAtMs = nowMs;
+      return rec;
+    }
+
+    async function ensureProfile(uid, provider) {
+      const profileRef = db.ref("kissme_auth_users/" + uid + "/profile");
+      const snap = await profileRef.once("value");
+      const prev = snap.val() || {};
+      st.returning = Boolean(prev.createdAtMs);
+
+      const nowMs = Date.now();
+      await profileRef.update({
+        uid,
+        provider,
+        createdAtMs: prev.createdAtMs || nowMs,
+        createdAtIso: prev.createdAtIso || nowIso(nowMs),
+        lastSeenAtMs: nowMs,
+        lastSeenAtIso: nowIso(nowMs)
+      });
+    }
+
+    async function loadLastLease(uid) {
+      const snap = await db.ref("kissme_auth_users/" + uid + "/leases")
+        .orderByChild("issuedAtMs")
+        .limitToLast(1)
+        .once("value");
+
+      let lease = null;
+      snap.forEach((child) => {
+        lease = child.val() || {};
+        lease.key_id = lease.key_id || child.key;
+      });
+
+      st.lastLease = lease;
+      if (!lease) {
+        el.leaseBox.textContent = "No lease yet.";
+      } else {
+        el.leaseBox.textContent = JSON.stringify(lease, null, 2);
+      }
+    }
+
+    function renderUser() {
+      el.uidText.textContent = st.uid || "-";
+      el.providerText.textContent = st.provider || "-";
+      el.returningText.textContent = st.returning ? "yes" : "no";
+      el.secretText.textContent = st.sessionSecret || "-";
+      el.secretIssuedText.textContent = st.sessionSecretIssuedAtMs ? nowIso(st.sessionSecretIssuedAtMs) : "-";
+      el.btnGenerate.disabled = !(st.uid && st.sessionSecret);
+      el.badge.textContent = st.uid ? ("Auth UID: " + st.uid) : "Auth: not signed in";
+    }
+
+    async function onSignedIn(user) {
+      st.uid = user.uid;
+      st.provider = providerName(user);
+      await ensureProfile(st.uid, st.provider);
+
+      const session = await createSessionSecret(st.uid, st.provider);
+      await loadLastLease(st.uid);
+
+      renderUser();
+      setStatus(
+        "Signed in. New session code generated.\n" +
+        "uid: " + st.uid + "\n" +
+        "secret: " + session.secret_code,
+        "ok"
+      );
+    }
+
+    async function signInGoogle() {
+      try {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        await auth.signInWithPopup(provider);
+      } catch (err) {
+        setStatus("Google login failed: " + err.message, "err");
+      }
+    }
+
+    async function registerEmail() {
+      const email = el.email.value.trim();
+      const pass = el.password.value;
+      if (!email || !pass) {
+        setStatus("Email and password are required.", "warn");
+        return;
+      }
+      try {
+        await auth.createUserWithEmailAndPassword(email, pass);
+      } catch (err) {
+        setStatus("Email register failed: " + err.message, "err");
+      }
+    }
+
+    async function loginEmail() {
+      const email = el.email.value.trim();
+      const pass = el.password.value;
+      if (!email || !pass) {
+        setStatus("Email and password are required.", "warn");
+        return;
+      }
+      try {
+        await auth.signInWithEmailAndPassword(email, pass);
+      } catch (err) {
+        setStatus("Email login failed: " + err.message, "err");
+      }
+    }
+
+    async function logout() {
+      try {
+        await auth.signOut();
+        st.uid = "";
+        st.provider = "";
+        st.returning = false;
+        st.sessionSecret = "";
+        st.sessionSecretIssuedAtMs = 0;
+        st.token = "";
+        el.tokenOut.value = "";
+        el.btnCopy.disabled = true;
+        renderUser();
+        setStatus("Signed out.", "warn");
+      } catch (err) {
+        setStatus("Logout failed: " + err.message, "err");
+      }
+    }
+
+    async function generateToken() {
+      if (!st.uid || !st.sessionSecret) {
+        setStatus("Sign in first. Session secret is required.", "warn");
+        return;
+      }
+
+      const machineUid = el.machineUid.value.trim();
+      const sshFp = el.sshFp.value.trim();
+      const hours = clampHours(el.leaseHours.value);
+      const note = el.note.value.trim();
+
+      if (!machineUid) {
+        setStatus("Machine UID is required.", "err");
+        return;
+      }
+      if (!sshFp) {
+        setStatus("SSH fingerprint is required.", "err");
+        return;
+      }
+
+      try {
+        const nowMs = Date.now();
+        const iat = Math.floor(nowMs / 1000);
+        const exp = iat + hours * 3600;
+        const keyId = randomHex(12);
+
+        const payload = {
+          issuer: "auth.eburon.ai",
+          uid: st.uid,
+          key_id: keyId,
+          machine_uid: machineUid,
+          ssh_fingerprint: sshFp,
+          kissme_secret: st.sessionSecret,
+          auth_provider: st.provider,
+          iat,
+          exp,
+          lease_hours: hours,
+          version: "kissme-2"
+        };
+
+        const token = b64Json(payload);
+        const lease = {
+          ...payload,
+          note,
+          issuedAtMs: nowMs,
+          issuedAtIso: nowIso(nowMs),
+          expiresAtIso: nowIso(exp * 1000),
+          tokenPreview: token.slice(0, 16) + "..." + token.slice(-10)
+        };
+
+        await db.ref("kissme_auth_users/" + st.uid + "/leases/" + keyId).set(lease);
+        await db.ref("kissme_auth_users/" + st.uid + "/profile").update({
+          lastLeaseKeyId: keyId,
+          lastIssuedAtMs: nowMs,
+          lastIssuedAtIso: nowIso(nowMs),
+          lastMachineUid: machineUid,
+          lastSshFingerprint: sshFp
+        });
+
+        st.token = token;
+        st.lastLease = lease;
+        el.tokenOut.value = token;
+        el.leaseBox.textContent = JSON.stringify(lease, null, 2);
+        el.btnCopy.disabled = false;
+
+        setStatus(
+          "Token generated.\n" +
+          "uid: " + st.uid + "\n" +
+          "key_id: " + keyId + "\n" +
+          "Use in CLI: /auth <token>",
+          "ok"
+        );
+      } catch (err) {
+        setStatus("Token generation failed: " + err.message, "err");
+      }
+    }
+
+    async function copyToken() {
+      const token = el.tokenOut.value.trim();
+      if (!token) return;
+      try {
+        await navigator.clipboard.writeText(token);
+        setStatus("Token copied.", "ok");
+      } catch (err) {
+        setStatus("Clipboard not available. Copy token manually.", "warn");
+      }
+    }
+
+    auth.onAuthStateChanged(async (user) => {
+      if (!user) {
+        st.uid = "";
+        st.provider = "";
+        st.returning = false;
+        st.sessionSecret = "";
+        st.sessionSecretIssuedAtMs = 0;
+        renderUser();
+        return;
+      }
+      try {
+        await onSignedIn(user);
+      } catch (err) {
+        setStatus("Session init failed: " + err.message, "err");
+      }
+    });
+
+    el.btnGoogle.addEventListener("click", signInGoogle);
+    el.btnRegister.addEventListener("click", registerEmail);
+    el.btnLogin.addEventListener("click", loginEmail);
+    el.btnLogout.addEventListener("click", logout);
+    el.btnGenerate.addEventListener("click", generateToken);
+    el.btnCopy.addEventListener("click", copyToken);
+
+    renderUser();
+  </script>
+</body>
+</html>

@@ -108,12 +108,17 @@ _ACTION_HINT_TOKENS = {
 _AUTH_ALLOWED_COMMANDS = {
     "/auth",
     "/auth-status",
+    "/kissme",
     "/help",
     "/commands",
     "/quit",
     "/exit",
     "/q",
 }
+AUTH_STATUS_POLL_SECONDS = max(
+    1,
+    int(os.environ.get("CODEMAXXX_AUTH_STATUS_POLL_SECONDS", "1")),
+)
 
 _STOPWORDS = {
     "the",
@@ -622,20 +627,29 @@ def _format_duration(seconds: int) -> str:
     return f"{hours}h {mins:02d}m"
 
 
-def _render_auth_required_md(status: AuthStatus) -> str:
+def _render_auth_required_md(status: AuthStatus, machine_uid: str = "") -> str:
+    portal = (status.portal_url or "").strip() or "auth.eburon.ai"
     lines = [
-        "## Authenticate",
+        "## KISSME Lock",
         "",
-        f"Authenticate: `{status.token_url}`",
+        "`[ KISS ME ]` -> `/kissme`",
+        "",
+        f"KISS ME Portal: `{portal}`",
+        f"Token endpoint: `{status.token_url}`",
         "",
         f"Reason: {status.reason}",
     ]
+    if machine_uid:
+        lines.append(f"Machine UID: `{machine_uid}`")
     if status.ssh_key_path:
         lines.append(f"SSH key: `{status.ssh_key_path}`")
     if status.ssh_fingerprint:
         lines.append(f"SSH fingerprint: `{status.ssh_fingerprint}`")
     lines.extend(
         [
+            "",
+            "KISS ME:",
+            "- `/kissme`",
             "",
             "Paste token:",
             "- `/auth <base64-token>`",
@@ -646,7 +660,7 @@ def _render_auth_required_md(status: AuthStatus) -> str:
     return "\n".join(lines)
 
 
-def _render_auth_status_md(status: AuthStatus) -> str:
+def _render_auth_status_md(status: AuthStatus, machine_uid: str = "") -> str:
     if status.authenticated:
         lines = [
             "## Authentication Status",
@@ -654,12 +668,40 @@ def _render_auth_status_md(status: AuthStatus) -> str:
             "State: active",
             f"Lease remaining: {_format_duration(status.seconds_left)}",
         ]
+        if machine_uid:
+            lines.append(f"Machine UID: `{machine_uid}`")
         if status.expires_at_iso:
             lines.append(f"Expires at (UTC): `{status.expires_at_iso}`")
+        lines.append(f"KISS ME Portal: `{(status.portal_url or '').strip() or 'auth.eburon.ai'}`")
         if status.ssh_fingerprint:
             lines.append(f"SSH fingerprint: `{status.ssh_fingerprint}`")
         return "\n".join(lines)
-    return _render_auth_required_md(status)
+    return _render_auth_required_md(status, machine_uid=machine_uid)
+
+
+def _open_kissme_portal(portal_url: str) -> tuple[bool, str]:
+    portal = (portal_url or "").strip() or "auth.eburon.ai"
+    target = portal if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", portal) else f"https://{portal}"
+
+    commands: list[list[str]] = []
+    if sys.platform == "darwin":
+        commands.append(["open", target])
+    elif os.name == "nt":
+        commands.append(["cmd", "/c", "start", "", target])
+    else:
+        if shutil.which("xdg-open"):
+            commands.append(["xdg-open", target])
+        if shutil.which("gio"):
+            commands.append(["gio", "open", target])
+
+    for cmd in commands:
+        try:
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True, f"Opened {portal}"
+        except Exception:
+            continue
+
+    return False, f"Could not open browser automatically. Open this manually: {portal}"
 
 
 def _quick_prompt_validation_response(user_msg: str) -> str:
@@ -1031,10 +1073,33 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
     last_assistant_md = ""
     master_emilio_override = False
     auth_status = get_auth_status(machine_uid)
+    tui.set_kissme_countdown(auth_status.seconds_left if auth_status.authenticated else 0)
     if auth_status.authenticated:
         tui.print_info(f"🔐 Auth lease active ({_format_duration(auth_status.seconds_left)} remaining).")
     else:
-        tui.print_assistant_md(_render_auth_required_md(auth_status))
+        tui.print_assistant_md(_render_auth_required_md(auth_status, machine_uid=machine_uid))
+    kissme_lock_visible = not auth_status.authenticated
+
+    async def _auth_status_monitor_loop():
+        nonlocal auth_status, kissme_lock_visible
+        while True:
+            try:
+                current = get_auth_status(machine_uid)
+                auth_status = current
+                tui.set_kissme_countdown(current.seconds_left if current.authenticated else 0)
+                if current.authenticated:
+                    kissme_lock_visible = False
+                else:
+                    if not kissme_lock_visible:
+                        tui.print_assistant_md(_render_auth_required_md(current, machine_uid=machine_uid))
+                        kissme_lock_visible = True
+                await asyncio.sleep(AUTH_STATUS_POLL_SECONDS)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                await asyncio.sleep(max(2, AUTH_STATUS_POLL_SECONDS))
+
+    auth_monitor_task = asyncio.create_task(_auth_status_monitor_loop())
 
     try:
         while True:
@@ -1102,19 +1167,30 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                         token = tui.console.input("[yellow]Base64 token[/yellow] ❯ ").strip()
                     ok, msg, updated = activate_base64_token(token, machine_uid)
                     auth_status = updated
+                    tui.set_kissme_countdown(auth_status.seconds_left if auth_status.authenticated else 0)
                     if ok:
+                        kissme_lock_visible = False
                         tui.print_info(msg)
-                        tui.print_assistant_md(_render_auth_status_md(auth_status))
+                        tui.print_assistant_md(_render_auth_status_md(auth_status, machine_uid=machine_uid))
                     else:
+                        kissme_lock_visible = True
                         tui.print_error(msg)
-                        tui.print_assistant_md(_render_auth_required_md(auth_status))
+                        tui.print_assistant_md(_render_auth_required_md(auth_status, machine_uid=machine_uid))
                     continue
                 if cmd == "/auth-status":
                     auth_status = get_auth_status(machine_uid)
-                    tui.print_assistant_md(_render_auth_status_md(auth_status))
+                    tui.print_assistant_md(_render_auth_status_md(auth_status, machine_uid=machine_uid))
+                    continue
+                if cmd == "/kissme":
+                    ok, msg = _open_kissme_portal(auth_status.portal_url)
+                    if ok:
+                        tui.print_info(msg)
+                    else:
+                        tui.print_error(msg)
                     continue
                 if not auth_status.authenticated and cmd not in _AUTH_ALLOWED_COMMANDS:
-                    tui.print_assistant_md(_render_auth_required_md(auth_status))
+                    kissme_lock_visible = True
+                    tui.print_assistant_md(_render_auth_required_md(auth_status, machine_uid=machine_uid))
                     continue
                 if cmd in ("/quit", "/exit", "/q"):
                     tui.console.print("[dim]Goodbye![/dim]")
@@ -1344,7 +1420,8 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
             try:
                 auth_status = get_auth_status(machine_uid)
                 if not auth_status.authenticated:
-                    tui.print_assistant_md(_render_auth_required_md(auth_status))
+                    kissme_lock_visible = True
+                    tui.print_assistant_md(_render_auth_required_md(auth_status, machine_uid=machine_uid))
                     continue
 
                 if not master_emilio_override and _requires_impl_confirmation(user_input):
@@ -1384,6 +1461,12 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                 tui.console.print("\n[dim]Response cancelled.[/dim]")
                 continue
     finally:
+        if auth_monitor_task:
+            auth_monitor_task.cancel()
+            try:
+                await auth_monitor_task
+            except asyncio.CancelledError:
+                pass
         if humor_task:
             humor_task.cancel()
             try:

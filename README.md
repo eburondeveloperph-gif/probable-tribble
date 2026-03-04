@@ -53,7 +53,8 @@ codemaxxx               Compatibility alias
 4. External GUI/system automation tools require explicit user approval at runtime
 5. Background humor-loading agent generates personality-aware loading lines while tasks run
 6. Terminal frontend renders live token streaming, thinking states, and humorous loading statuses
-7. KISSME auth gate enforces an SSH-bound lease that expires every 24h (`/auth`, `/auth-status`)
+7. KISSME auth gate enforces an SSH-bound lease that expires every 24h (`/kissme`, `/auth`, `/auth-status`)
+   Token issuer UI: `kissme/token.html` (single-file Firebase app)
 
 ### Built-in skill agents
 

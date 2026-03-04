@@ -54,6 +54,9 @@ class OllamaClient:
             async with client.stream(
                 "POST", f"{self.host}/api/chat", json=payload
             ) as resp:
+                if resp.status_code == 404:
+                    body = await resp.aread()
+                    raise Exception(f"Model '{self.model}' not found. Run: ollama pull {self.model}")
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
                     if not line.strip():

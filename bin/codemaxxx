@@ -4,7 +4,8 @@
 #              install OpenCode, and launch OpenCode through Ollama.
 #
 #  Usage:
-#    codemax                   # full bootstrap + launch
+#    codemax                   # launch TUI agent
+#    codemax bootstrap         # full bootstrap + launch
 #    codemax launch            # quick launch (skip install steps)
 #    codemax install           # install everything, don't launch
 #    codemax pull              # just pull/update the model
@@ -163,7 +164,8 @@ usage() {
   printf '\n'
   printf '  %s — Eburon CodeMax CLI\n\n' "${CLI_NAME}"
   printf '  Usage:\n'
-  printf '    %s               Full bootstrap + launch\n' "${CLI_NAME}"
+  printf '    %s               Launch CodeMaxxx TUI agent (interactive)\n' "${CLI_NAME}"
+  printf '    %s bootstrap     Full bootstrap + launch\n' "${CLI_NAME}"
   printf '    %s tui           Launch CodeMaxxx TUI agent (interactive)\n' "${CLI_NAME}"
   printf '    %s install       Install Ollama, pull model, install OpenCode\n' "${CLI_NAME}"
   printf '    %s launch        Quick launch via ollama launch\n' "${CLI_NAME}"
@@ -174,6 +176,9 @@ usage() {
 }
 
 case "${1:-}" in
+  bootstrap)
+    bootstrap
+    ;;
   install)
     install_ollama
     ensure_server
@@ -181,10 +186,12 @@ case "${1:-}" in
     install_opencode
     ok "All done — run '${CLI_NAME} launch' to start."
     ;;
-  tui|agent)
+  ""|tui|agent)
     step "Launching CodeMaxxx TUI Agent"
     SCRIPT_DIR="$(resolve_repo_dir)"
-    shift || true
+    if [[ "${1:-}" != "" ]]; then
+      shift || true
+    fi
     if [[ -f "${SCRIPT_DIR}/.venv/bin/python" ]]; then
       exec "${SCRIPT_DIR}/.venv/bin/python" -m codemaxxx.main "$@"
     elif [[ -f "${HOME}/.codemaxxx/.venv/bin/python" ]]; then
@@ -203,9 +210,6 @@ case "${1:-}" in
     ;;
   help|--help|-h)
     usage
-    ;;
-  "")
-    bootstrap
     ;;
   *)
     err "Unknown command: $1"

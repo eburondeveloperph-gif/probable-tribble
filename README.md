@@ -26,7 +26,8 @@ brew tap eburondeveloperph-gif/codemaxxx && brew install eburon-codemaxxx
 ## CLI Usage
 
 ```
-codemax                 Full bootstrap + launch
+codemax                 Launch autonomous Manus-style multi-agent workflow
+codemax bootstrap       Full bootstrap + launch
 codemax install         Install Ollama, pull model, install OpenCode (no launch)
 codemax launch          Quick launch (skip install steps)
 codemax pull            Pull / update the model only

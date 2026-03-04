@@ -8,6 +8,17 @@ CodeMaxxx — AI coding agent for the terminal, powered by Ollama.
 npm i -g eburon-codemaxxx
 ```
 
+By default, global install now attempts runtime bootstrap automatically:
+- install/update Ollama
+- pull default model
+- install OpenCode
+
+Disable auto-bootstrap during npm install:
+
+```bash
+CODEMAXXX_AUTO_INSTALL=0 npm i -g eburon-codemaxxx
+```
+
 ## Usage
 
 ```bash

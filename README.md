@@ -2,7 +2,7 @@
 
 One-command CLI that bootstraps your local AI coding environment:
 
-1. **Installs / updates Ollama** (via Homebrew or macOS app symlink)
+1. **Installs / updates Ollama** (Homebrew/macOS app symlink/Linux installer)
 2. **Pulls `eburonmax/codemax-v3`** model
 3. **Installs OpenCode** (`opencode`) via `curl -fsSL https://opencode.ai/install | bash`
 4. **Launches OpenCode through Ollama**: `ollama launch opencode --model eburonmax/codemax-v3`
@@ -13,6 +13,13 @@ One-command CLI that bootstraps your local AI coding environment:
 
 ```bash
 npm i -g eburon-codemaxxx
+```
+
+`npm i -g` now attempts runtime auto-install (Ollama + model + OpenCode).
+Disable with:
+
+```bash
+CODEMAXXX_AUTO_INSTALL=0 npm i -g eburon-codemaxxx
 ```
 
 ```bash

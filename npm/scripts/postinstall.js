@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// postinstall — clone repo + set up Python venv silently
+// postinstall — clone repo + set up Python venv + optional runtime bootstrap
 
 const { execSync } = require("child_process");
 const path = require("path");
@@ -8,10 +8,21 @@ const os = require("os");
 
 const INSTALL_DIR = path.join(os.homedir(), ".codemaxxx");
 const REPO = "https://github.com/eburondeveloperph-gif/probable-tribble.git";
+const AUTO_INSTALL_ENABLED =
+  !["0", "false", "no", "off"].includes(String(process.env.CODEMAXXX_AUTO_INSTALL || "").toLowerCase());
 
 function run(cmd) {
   try {
     execSync(cmd, { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runVerbose(cmd) {
+  try {
+    execSync(cmd, { stdio: "inherit" });
     return true;
   } catch {
     return false;
@@ -42,6 +53,32 @@ const pip = path.join(INSTALL_DIR, ".venv", "bin", "pip");
 if (fs.existsSync(pip)) {
   console.log("  → Installing Python dependencies...");
   run(`"${pip}" install --quiet -e "${INSTALL_DIR}"`);
+}
+
+const cliPath = path.join(INSTALL_DIR, "bin", "codemax");
+if (AUTO_INSTALL_ENABLED && fs.existsSync(cliPath)) {
+  console.log("  → Auto-installing Ollama + model + OpenCode (set CODEMAXXX_AUTO_INSTALL=0 to skip)...");
+  const ok = runVerbose(`bash "${cliPath}" install`);
+  if (!ok) {
+    console.log("  ⚠ Auto-install step failed (non-fatal).");
+    console.log("    Run manually: codemax install");
+  }
+}
+
+const npmBin = (() => {
+  try {
+    return execSync("npm bin -g", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+  } catch {
+    return "";
+  }
+})();
+
+if (npmBin) {
+  const pathParts = (process.env.PATH || "").split(path.delimiter);
+  if (!pathParts.includes(npmBin)) {
+    console.log(`  ⚠ npm global bin is not in PATH: ${npmBin}`);
+    console.log(`    Add it, then reload shell: export PATH="${npmBin}:$PATH"`);
+  }
 }
 
 console.log("");

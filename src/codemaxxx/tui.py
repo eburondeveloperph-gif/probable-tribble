@@ -33,6 +33,7 @@ LOGO = r"""
 | |__| |_| | |_| | |___| |  | |/ ___ \ /  \
  \____\___/|____/|_____|_|  |_/_/   \_/_/\_\
 """
+LOGO_COMPACT = "CODEMAX"
 
 console = Console(theme=THEME)
 
@@ -98,6 +99,33 @@ def _session_meta_text() -> str:
         f"{_SESSION_APP_NAME}  /workspace {_SESSION_WORKSPACE}  "
         f"/total tokens created {_SESSION_TOTAL_TOKENS:,}"
     )
+
+
+def _terminal_width() -> int:
+    return max(20, int(console.size.width))
+
+
+def _truncate_middle(text: str, max_len: int) -> str:
+    if max_len <= 0:
+        return ""
+    value = text or ""
+    if len(value) <= max_len:
+        return value
+    if max_len <= 3:
+        return "." * max_len
+    tail_len = max(1, max_len - 3)
+    return "..." + value[-tail_len:]
+
+
+def _fit_cell(text: str, width: int) -> str:
+    if width <= 0:
+        return ""
+    value = (text or "").strip()
+    if len(value) <= width:
+        return value.ljust(width)
+    if width <= 1:
+        return value[:width]
+    return (value[: width - 1] + "…")
 
 
 def _next_dynamic_quip() -> Optional[str]:
@@ -190,36 +218,65 @@ def print_header(model: str, host: str, workflow: str = "manus"):
     finish_stream()
     console.clear()
 
-    top_pad = 1
+    width = _terminal_width()
+    top_pad = 0 if width < 64 else 1
     for _ in range(top_pad):
         console.print()
 
-    console.print(Align.center(Text(LOGO, style="bold bright_white")))
+    logo_text = LOGO if width >= 62 else LOGO_COMPACT
+    logo_style = "bold bright_white" if width >= 62 else "bold bright_cyan"
+    console.print(Align.center(Text(logo_text, style=logo_style)))
     console.print(Align.center(Text("by Eburon AI", style="dim")))
     console.print()
 
+
 def _landing_shortcuts_line():
-    shortcuts = Text()
-    shortcuts.append("ctrl+u", style="bold bright_white")
-    shortcuts.append(" tab agents    ", style="dim")
-    shortcuts.append("ctrl+i", style="bold bright_white")
-    shortcuts.append(" commands", style="dim")
     console.print()
-    console.print(Align.center(shortcuts))
+    if _terminal_width() < 58:
+        line1 = Text()
+        line1.append("ctrl+u", style="bold bright_white")
+        line1.append(" tab agents", style="dim")
+        line2 = Text()
+        line2.append("ctrl+i", style="bold bright_white")
+        line2.append(" commands", style="dim")
+        console.print(Align.center(line1))
+        console.print(Align.center(line2))
+    else:
+        shortcuts = Text()
+        shortcuts.append("ctrl+u", style="bold bright_white")
+        shortcuts.append(" tab agents    ", style="dim")
+        shortcuts.append("ctrl+i", style="bold bright_white")
+        shortcuts.append(" commands", style="dim")
+        console.print(Align.center(shortcuts))
     console.print()
 
 
 def print_prompt_footer():
     """Render session metadata with a 3-line colored full-width separator."""
-    width = max(20, console.size.width - 1)
+    width = max(20, _terminal_width() - 1)
     gap = " " * width
     for style in ("on bright_cyan", "on cyan", "on bright_blue"):
         console.print(Text(gap, style=style), no_wrap=True, overflow="crop")
 
+    workspace_cap = 26 if width < 72 else 46
+    workspace = _truncate_middle(_SESSION_WORKSPACE, workspace_cap)
+
+    if width < 66:
+        line1 = Text()
+        line1.append(f"{_SESSION_APP_NAME} ", style="brand")
+        line1.append("/workspace ", style="dim")
+        line1.append(workspace, style="assistant")
+        line2 = Text()
+        line2.append("/total tokens created ", style="dim")
+        line2.append(f"{_SESSION_TOTAL_TOKENS:,}", style="brand")
+        console.print(line1)
+        console.print(line2)
+        return
+
     line = Text()
     line.append(f"{_SESSION_APP_NAME} ", style="brand")
     line.append("/workspace ", style="dim")
-    line.append(_SESSION_WORKSPACE, style="assistant")
+    line.append(workspace, style="assistant")
     line.append(" /total tokens created ", style="dim")
     line.append(f"{_SESSION_TOTAL_TOKENS:,}", style="brand")
     console.print(line)
@@ -227,18 +284,22 @@ def print_prompt_footer():
 
 def input_first_prompt() -> str:
     """Render first-prompt clipped box style and collect user input."""
-    width = min(78, max(48, console.size.width - 8))
-    left_pad = max(0, (console.size.width - width) // 2)
+    terminal_w = _terminal_width()
+    width = min(78, max(22, terminal_w - 8))
+    left_pad = max(0, (terminal_w - width) // 2)
     left = " " * left_pad
+    cell_width = max(12, width - 2)
+    ask_line = 'Ask anything... "Fix broken tests"' if cell_width >= 32 else "Ask anything..."
+    automate_line = "AUTOMATE codemax" if cell_width >= 18 else "AUTOMATE"
 
     def vrow(text: str = "") -> str:
-        clipped = text[:width]
+        clipped = _fit_cell(text, cell_width)
         return f"{left}┃ {clipped}"
 
     console.print(f"{left}┃")
-    console.print(vrow('Ask anything... "Fix broken tests"'))
+    console.print(vrow(ask_line))
     console.print(f"{left}┃")
-    console.print(vrow("AUTOMATE codemax"))
+    console.print(vrow(automate_line))
     console.print(f"{left}┃")
     user_input = console.input(f"{left}┃  [green]❯[/green] ").strip()
     console.print(f"{left}╹" + ("▀" * width))
@@ -350,32 +411,46 @@ def print_help():
     """Print help."""
     clear_status()
     finish_stream()
+    commands = [
+        ("/help", "Show this help"),
+        ("/commands", "Alias for /help"),
+        ("/agents", "Alias for /skills"),
+        ("/copy-last", "Copy last assistant response to clipboard"),
+        ("/copy <text>", "Copy custom text to clipboard"),
+        ("/skills", "Show dedicated skill agents and model routing"),
+        ("/skills-custom", "Show user-created custom skills"),
+        ("/skill-create <name>", "Create/update your own skill interactively"),
+        ("/skills-offline", "Show full offline autonomy skill framework"),
+        ("/skills-online", "Show 30 online-mode autonomous skills"),
+        ("/skills-all", "Show offline + online full skill map"),
+        ("/roadmap-online", "Show full 50-skill browser/UI roadmap"),
+        ("/roadmap-online-start", "Show required first 8 build skills"),
+        ("/roadmap-online-phase <1-7>", "Show one roadmap phase with dependencies"),
+        ("/autolearn-now", "Run DB learning pass immediately"),
+        ("/personality-save <text>", "Save user personality profile to memory"),
+        ("/personality-show", "Show saved personality profile"),
+        ("/humor-profile <text>", "Save loading-humor preference profile"),
+        ("/humor-profile-show", "Show saved loading-humor profile"),
+        ("/workflow", "Show active workflow details"),
+        ("/choices", "Show pending numbered options from last assistant output"),
+        ("/pick <n>", "Select a pending option and continue execution"),
+        ("/clear", "Clear in-memory skill contexts"),
+        ("/model <name>", "Set fallback model for skill routing"),
+        ("/quit", "Exit CodeMaxxx"),
+    ]
+
+    if _terminal_width() < 80:
+        lines = ["[brand]Commands[/brand]", ""]
+        for cmd, desc in commands:
+            lines.append(f"[brand]{cmd}[/brand]")
+            lines.append(f"[dim]{desc}[/dim]")
+        lines.extend(["", "[dim]Ctrl+C[/dim] Cancel current response", "[dim]Ctrl+D[/dim] Exit"])
+        console.print(Panel(Text.from_markup("\n".join(lines)), border_style="bright_cyan"))
+        return
+
     help_table = Table.grid(padding=(0, 2))
-    help_table.add_row("[brand]/help[/brand]", "Show this help")
-    help_table.add_row("[brand]/commands[/brand]", "Alias for /help")
-    help_table.add_row("[brand]/agents[/brand]", "Alias for /skills")
-    help_table.add_row("[brand]/copy-last[/brand]", "Copy last assistant response to clipboard")
-    help_table.add_row("[brand]/copy <text>[/brand]", "Copy custom text to clipboard")
-    help_table.add_row("[brand]/skills[/brand]", "Show dedicated skill agents and model routing")
-    help_table.add_row("[brand]/skills-custom[/brand]", "Show user-created custom skills")
-    help_table.add_row("[brand]/skill-create <name>[/brand]", "Create/update your own skill interactively")
-    help_table.add_row("[brand]/skills-offline[/brand]", "Show full offline autonomy skill framework")
-    help_table.add_row("[brand]/skills-online[/brand]", "Show 30 online-mode autonomous skills")
-    help_table.add_row("[brand]/skills-all[/brand]", "Show offline + online full skill map")
-    help_table.add_row("[brand]/roadmap-online[/brand]", "Show full 50-skill browser/UI roadmap")
-    help_table.add_row("[brand]/roadmap-online-start[/brand]", "Show required first 8 build skills")
-    help_table.add_row("[brand]/roadmap-online-phase <1-7>[/brand]", "Show one roadmap phase with dependencies")
-    help_table.add_row("[brand]/autolearn-now[/brand]", "Run DB learning pass immediately")
-    help_table.add_row("[brand]/personality-save <text>[/brand]", "Save user personality profile to memory")
-    help_table.add_row("[brand]/personality-show[/brand]", "Show saved personality profile")
-    help_table.add_row("[brand]/humor-profile <text>[/brand]", "Save loading-humor preference profile")
-    help_table.add_row("[brand]/humor-profile-show[/brand]", "Show saved loading-humor profile")
-    help_table.add_row("[brand]/workflow[/brand]", "Show active workflow details")
-    help_table.add_row("[brand]/choices[/brand]", "Show pending numbered options from last assistant output")
-    help_table.add_row("[brand]/pick <n>[/brand]", "Select a pending option and continue execution")
-    help_table.add_row("[brand]/clear[/brand]", "Clear in-memory skill contexts")
-    help_table.add_row("[brand]/model <name>[/brand]", "Set fallback model for skill routing")
-    help_table.add_row("[brand]/quit[/brand]", "Exit CodeMaxxx")
+    for cmd, desc in commands:
+        help_table.add_row(f"[brand]{cmd}[/brand]", desc)
     help_table.add_row("", "")
     help_table.add_row("[dim]Ctrl+C[/dim]", "Cancel current response")
     help_table.add_row("[dim]Ctrl+D[/dim]", "Exit")

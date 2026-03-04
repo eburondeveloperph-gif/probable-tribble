@@ -51,6 +51,18 @@ install_ollama() {
     fi
   fi
 
+  # Linux fallback: use official installer when Ollama is not present.
+  if ! command -v ollama >/dev/null 2>&1 && [[ "$(uname -s)" == "Linux" ]]; then
+    if command -v curl >/dev/null 2>&1; then
+      info "Linux detected — installing Ollama via official installer..."
+      curl -fsSL https://ollama.com/install.sh | sh
+    else
+      err "curl is required to install Ollama on Linux."
+      err "Install curl first, then run '${CLI_NAME} install' again."
+      exit 1
+    fi
+  fi
+
   # macOS app fallback: create symlink to embedded CLI
   if ! command -v ollama >/dev/null 2>&1; then
     local app_cli="/Applications/Ollama.app/Contents/Resources/ollama"

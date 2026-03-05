@@ -368,7 +368,51 @@ class ManusWorkflow:
         )
         return any(token in lowered for token in build_tokens) and any(token in lowered for token in target_tokens)
 
+    def _is_bug_fix_request(self, user_request: str) -> bool:
+        lowered = (user_request or "").lower()
+        bug_tokens = (
+            "bug",
+            "defect",
+            "incident",
+            "issue",
+            "error",
+            "exception",
+            "traceback",
+            "stack trace",
+            "crash",
+            "broken",
+            "regression",
+            "fails",
+            "failing",
+            "failure",
+        )
+        action_tokens = (
+            "fix",
+            "repair",
+            "patch",
+            "resolve",
+            "investigate",
+            "triage",
+            "root cause",
+            "debug",
+            "self heal",
+            "self-heal",
+            "fix itself",
+        )
+        has_bug = any(token in lowered for token in bug_tokens)
+        has_action = any(token in lowered for token in action_tokens)
+        return has_bug and has_action
+
     async def _build_plan(self, user_request: str, memory_context: str) -> list[PlanStep]:
+        if self._is_bug_fix_request(user_request):
+            return [
+                PlanStep("bug_triage", f"Triage and reproduce failures for: {user_request}"),
+                PlanStep("root_cause", f"Perform root-cause analysis for: {user_request}"),
+                PlanStep("bug_fixer", f"Implement minimal-risk bug fix for: {user_request}"),
+                PlanStep("regression_guard", f"Run targeted regression checks for: {user_request}"),
+                PlanStep("reviewer", "Review fix quality, residual risk, and recommended follow-up actions."),
+            ]
+
         if not self.master_emilio_override and self._is_code_generation_or_app_request(user_request):
             return [
                 PlanStep("se_architect", f"Define architecture and execution plan for: {user_request}"),

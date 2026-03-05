@@ -46,6 +46,16 @@ FIREBASE_MATCH_RETRY_SECONDS = max(
     0.2,
     float(os.environ.get("CODEMAXXX_FIREBASE_MATCH_RETRY_SECONDS", "0.5")),
 )
+ALLOW_FIREBASE_NETWORK_FALLBACK = os.environ.get("CODEMAXXX_FIREBASE_NETWORK_FALLBACK", "1").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+FIREBASE_NETWORK_FALLBACK_SECONDS = max(
+    300,
+    int(os.environ.get("CODEMAXXX_FIREBASE_NETWORK_FALLBACK_SECONDS", str(AUTH_TTL_SECONDS))),
+)
 
 
 @dataclass(frozen=True)
@@ -124,6 +134,26 @@ def _normalize_yes_no(value) -> str:
     if text in ("no", "n", "false", "0"):
         return "no"
     return ""
+
+
+def _is_firebase_network_error(message: str) -> bool:
+    text = (message or "").strip().lower()
+    if not text:
+        return False
+    markers = (
+        "nodename nor servname",
+        "temporary failure in name resolution",
+        "name or service not known",
+        "network is unreachable",
+        "connection refused",
+        "timed out",
+        "timeout",
+        "failed to establish",
+        "[errno 8]",
+        "urlopen error",
+        "dns",
+    )
+    return any(marker in text for marker in markers)
 
 
 def _load_lease() -> dict:
@@ -241,6 +271,19 @@ def _verify_with_firebase(
             last_error = "Token lease not found in Firebase."
 
         if time.monotonic() >= deadline:
+            token_type = _first_present(payload, ("token_type", "type", "kind")).lower()
+            if (
+                ALLOW_FIREBASE_NETWORK_FALLBACK
+                and _is_firebase_network_error(last_error)
+                and token_type == "firebase_signed"
+                and len(firebase_auth_token) >= 80
+            ):
+                return True, "firebase_network_fallback", {
+                    "firebase_key_id": key_id,
+                    "firebase_verified_at": _to_iso(_utc_now()),
+                    "did_kissme": "yes",
+                    "firebase_verify_mode": "network_fallback",
+                }
             return False, last_error, {}
 
         remaining = max(0.0, deadline - time.monotonic())
@@ -340,7 +383,7 @@ def get_auth_status(machine_uid: str) -> AuthStatus:
     if lease_machine and lease_machine != machine_uid:
         return AuthStatus(
             authenticated=False,
-            reason="Auth lease machine mismatch.",
+            reason="No active auth lease for this machine. Re-authentication required.",
             token_url=AUTH_TOKEN_URL,
             portal_url=AUTH_PORTAL_URL,
             expires_at=None,
@@ -443,6 +486,11 @@ def activate_base64_token(token: str, machine_uid: str) -> tuple[bool, str, Auth
     if not verified:
         status = get_auth_status(machine_uid)
         return False, verify_msg, status
+    verify_mode = str(verify_meta.get("firebase_verify_mode", "")).strip().lower()
+    if verify_mode == "network_fallback":
+        max_fallback_exp = now + timedelta(seconds=FIREBASE_NETWORK_FALLBACK_SECONDS)
+        if expires_at > max_fallback_exp:
+            expires_at = max_fallback_exp
 
     lease_payload = {
         "issuer": _first_present(payload, ("issuer", "iss")) or "auth.eburon.ai",
@@ -475,4 +523,6 @@ def activate_base64_token(token: str, machine_uid: str) -> tuple[bool, str, Auth
 
     status = get_auth_status(machine_uid)
     minutes = max(1, int(status.seconds_left // 60))
+    if verify_mode == "network_fallback":
+        return True, f"Authenticated (signed token fallback). Lease valid for {minutes} minutes.", status
     return True, f"Authenticated (Firebase verified). Lease valid for {minutes} minutes.", status

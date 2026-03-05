@@ -155,33 +155,19 @@
   <div class="wrap">
     <section class="card">
       <h1>KISSME Auth</h1>
-      <p>Use Google or Email auth, then issue a Firebase-verified signed token for the CodeMaxxx CLI.</p>
+      <p>Use Google auth, then issue a Firebase-verified signed token for the CodeMaxxx CLI.</p>
       <p><span class="pill" id="badge">Auth: not signed in</span></p>
 
       <h2>1) Connect</h2>
       <div class="btns">
-        <button id="btnConnect" class="primary">Connect</button>
+        <button id="btnConnect" class="primary">Connect Google</button>
         <button id="btnKissme">KISSME</button>
-      </div>
-
-      <div class="row">
-        <div class="field">
-          <label for="email">Email</label>
-          <input id="email" type="email" placeholder="you@example.com" />
-        </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <input id="password" type="password" placeholder="at least 6 chars" />
-        </div>
-      </div>
-      <div class="btns">
-        <p class="small">If email/password is filled, Connect uses email auth. If empty, Connect uses Google.</p>
       </div>
 
       <h2 style="margin-top:14px;">2) Issue Token</h2>
       <div class="field">
         <label for="machineUid">Machine UID (from CLI)</label>
-        <input id="machineUid" type="text" placeholder="32-char machine uid" />
+        <input id="machineUid" type="text" placeholder="32-char machine uid" minlength="32" maxlength="32" pattern="[a-fA-F0-9]{32}" />
       </div>
       <div class="field">
         <label for="didKissme">Did he KISSME? (yes/no)</label>
@@ -255,8 +241,6 @@
 
     const el = {
       badge: document.getElementById("badge"),
-      email: document.getElementById("email"),
-      password: document.getElementById("password"),
       machineUid: document.getElementById("machineUid"),
       didKissme: document.getElementById("didKissme"),
       status: document.getElementById("status"),
@@ -315,9 +299,17 @@
       return "";
     }
 
+    function normalizeMachineUid(value) {
+      return String(value || "").trim().toLowerCase();
+    }
+
+    function isValidMachineUid(value) {
+      return /^[a-f0-9]{32}$/.test(normalizeMachineUid(value));
+    }
+
     function portalUrlWithMachine() {
       const target = new URL(window.location.href);
-      const machineUid = el.machineUid.value.trim();
+      const machineUid = normalizeMachineUid(el.machineUid.value);
       if (machineUid) {
         target.searchParams.set("machine_uid", machineUid);
       } else {
@@ -404,7 +396,7 @@
     }
 
     async function loadLastLease(uid) {
-      const machineUid = el.machineUid.value.trim();
+      const machineUid = normalizeMachineUid(el.machineUid.value);
       const snap = await db.ref("kissme_auth_users/" + uid + "/leases")
         .orderByChild("issuedAtMs")
         .limitToLast(60)
@@ -456,7 +448,7 @@
 
       const session = await createSessionSecret(st.uid, st.provider);
       await loadLastLease(st.uid);
-      const machineUid = el.machineUid.value.trim();
+      const machineUid = normalizeMachineUid(el.machineUid.value);
       const didKissme = normalizeYesNo(el.didKissme.value);
       if (machineUid) {
         await generateToken(true);
@@ -477,32 +469,16 @@
     }
 
     async function connect() {
-      const email = el.email.value.trim();
-      const pass = el.password.value;
-      if (email || pass) {
-        if (!email || !pass) {
-          setStatus("Provide both email and password, or leave both empty for Google.", "warn");
-          return;
-        }
-        try {
-          await auth.signInWithEmailAndPassword(email, pass);
-          return;
-        } catch (_err) {
-          try {
-            await auth.createUserWithEmailAndPassword(email, pass);
-            return;
-          } catch (err) {
-            setStatus("Email connect failed: " + err.message, "err");
-            return;
-          }
-        }
+      if (auth.currentUser) {
+        await onSignedIn(auth.currentUser);
+        return;
       }
 
       try {
         const provider = new firebase.auth.GoogleAuthProvider();
         await auth.signInWithPopup(provider);
       } catch (err) {
-        setStatus("Google connect failed: " + err.message, "err");
+        setStatus("Google connect failed. Please allow popup and try again.\n" + err.message, "err");
       }
     }
 
@@ -524,12 +500,16 @@
         return;
       }
 
-      const machineUid = el.machineUid.value.trim();
+      const machineUid = normalizeMachineUid(el.machineUid.value);
       const didKissme = normalizeYesNo(el.didKissme.value);
       const hours = 24;
 
       if (!machineUid) {
         if (!silent) setStatus("Machine UID is required.", "err");
+        return;
+      }
+      if (!isValidMachineUid(machineUid)) {
+        if (!silent) setStatus("Machine UID must be exactly 32 hex characters.", "err");
         return;
       }
       if (!didKissme) {
@@ -668,7 +648,7 @@
     });
 
     const params = new URLSearchParams(window.location.search || "");
-    const machineFromQuery = (params.get("machine_uid") || "").trim();
+    const machineFromQuery = normalizeMachineUid(params.get("machine_uid") || "");
     if (machineFromQuery) {
       el.machineUid.value = machineFromQuery;
       setStatus("Machine UID autofilled from KISS ME link.", "ok");

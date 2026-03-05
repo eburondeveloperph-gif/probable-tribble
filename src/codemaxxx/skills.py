@@ -525,6 +525,54 @@ SKILLS: dict[str, SkillSpec] = {
             f"{TOOL_FORMAT}"
         ),
     ),
+    "bug_triage": SkillSpec(
+        name="bug_triage",
+        description="Triage bug reports/failures, reproduce signals, and isolate impacted scope quickly.",
+        variants=("ebr_self_heal_codex", "ebr_self_heal_beta"),
+        tools=("shell", "git", "read_file", "glob", "grep", "list_dir", "recall_memory"),
+        system_prompt=(
+            "You are EBR Bug Triage Agent. Rapidly classify bugs, reproduce failures, and scope impact. "
+            f"{UNCENSORED_RULES} "
+            "Prioritize deterministic repro steps, exact failing artifacts, and highest-risk breakages first. "
+            f"{TOOL_FORMAT}"
+        ),
+    ),
+    "root_cause": SkillSpec(
+        name="root_cause",
+        description="Perform root-cause analysis for defects using concrete evidence and causality chains.",
+        variants=("ebr_self_heal_codex", "ebr_self_heal_beta"),
+        tools=("shell", "git", "read_file", "glob", "grep", "list_dir"),
+        system_prompt=(
+            "You are EBR Root Cause Agent. Determine why the bug exists and identify minimal safe fix surfaces. "
+            f"{UNCENSORED_RULES} "
+            "Use evidence-backed causality, not guesses. Explicitly separate symptom, trigger, and root defect. "
+            f"{TOOL_FORMAT}"
+        ),
+    ),
+    "bug_fixer": SkillSpec(
+        name="bug_fixer",
+        description="Implement focused bug fixes with minimal diffs and clear behavioral intent.",
+        variants=("ebr_coder_codex", "ebr_coder_beta"),
+        tools=("read_file", "write_file", "edit_file", "glob", "grep", "list_dir", "shell", "git"),
+        system_prompt=(
+            "You are EBR Bug Fixer Agent. Apply precise fixes for validated root causes with minimal blast radius. "
+            f"{UNCENSORED_RULES} "
+            "Avoid unrelated refactors, preserve existing contracts, and keep patches small and reviewable. "
+            f"{TOOL_FORMAT}"
+        ),
+    ),
+    "regression_guard": SkillSpec(
+        name="regression_guard",
+        description="Harden fixes with regression checks, targeted tests, and risk-focused validation.",
+        variants=("ebr_tester_beta", "ebr_tester_codex"),
+        tools=("shell", "git", "read_file", "glob", "grep", "list_dir"),
+        system_prompt=(
+            "You are EBR Regression Guard Agent. Prove bug fixes and detect regressions before handoff. "
+            f"{UNCENSORED_RULES} "
+            "Run targeted checks, report exact pass/fail evidence, and call out remaining risk explicitly. "
+            f"{TOOL_FORMAT}"
+        ),
+    ),
     "user_learning": SkillSpec(
         name="user_learning",
         description="Learn stable user patterns from local data and save high-value behavior signals.",
@@ -1548,6 +1596,32 @@ def normalize_skill(skill: str) -> str:
 def route_skill(task: str) -> str:
     """Heuristic router used when planner output is incomplete."""
     text = (task or "").lower()
+    bug_tokens = (
+        "bug",
+        "defect",
+        "incident",
+        "issue",
+        "error",
+        "exception",
+        "traceback",
+        "stack trace",
+        "crash",
+        "broken",
+        "fails",
+        "failing",
+        "failure",
+        "regression",
+    )
+    fix_tokens = (
+        "fix",
+        "repair",
+        "patch",
+        "resolve",
+        "hotfix",
+        "self fix",
+        "self-fix",
+        "fix itself",
+    )
     if any(ord(ch) > 127 for ch in text):
         return "multilingual_understanding"
     if any(token in text for token in ("plan", "roadmap", "breakdown", "workflow")):
@@ -1583,6 +1657,16 @@ def route_skill(task: str) -> str:
         return "os_automation"
     if any(token in text for token in ("fix own failure", "self-heal", "self heal", "auto-recover", "recover failure")):
         return "self_heal"
+    if any(token in text for token in ("root cause", "rca")) and any(token in text for token in bug_tokens):
+        return "root_cause"
+    if "triage" in text and any(token in text for token in bug_tokens):
+        return "bug_triage"
+    if any(token in text for token in ("regression test", "regression guard", "prevent regression")):
+        return "regression_guard"
+    if any(token in text for token in bug_tokens) and any(token in text for token in fix_tokens):
+        return "bug_fixer"
+    if any(token in text for token in bug_tokens):
+        return "bug_triage"
     if any(token in text for token in ("learn from users data", "learn user data", "learn preferences", "user learning")):
         return "user_learning"
     if any(token in text for token in ("save personality", "user personality", "personality profile", "tone profile")):
@@ -1820,7 +1904,7 @@ def planner_capability_brief() -> str:
         "- local tool orchestration, verification, and rollback",
         "- safety gates for destructive actions",
         "Role packs: coding, file organizer, call-center simulator, desktop automation, research assistant.",
-        "Additional dedicated skills: gui_automation, direct_system_control, call_simulation, os_automation, self_heal, user_learning, personality, multilingual_understanding, humor_loading.",
+        "Additional dedicated skills: gui_automation, direct_system_control, call_simulation, os_automation, self_heal, bug_triage, root_cause, bug_fixer, regression_guard, user_learning, personality, multilingual_understanding, humor_loading.",
         "External tools always require explicit user approval before command execution.",
         "Custom skills can be created on demand and persisted per workspace.",
         "Online-mode capability set exists (30 skills) plus a 50-skill browser/UI roadmap.",

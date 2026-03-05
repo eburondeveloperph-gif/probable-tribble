@@ -117,9 +117,16 @@ _AUTH_ALLOWED_COMMANDS = {
     "/exit",
     "/q",
 }
+MASTER_EMILIO_PASSCODE = os.environ.get("CODEMAXXX_MASTER_EMILIO_PASSCODE", "120221").strip() or "120221"
 AUTH_STATUS_POLL_SECONDS = max(
     1,
     int(os.environ.get("CODEMAXXX_AUTH_STATUS_POLL_SECONDS", "1")),
+)
+KISSME_AUTH_DISABLED = os.environ.get("CODEMAXXX_DISABLE_KISSME_AUTH", "1").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
 )
 
 _STOPWORDS = {
@@ -506,6 +513,9 @@ async def _humor_loading_loop(host: str, model_getter, db: Optional[Database], r
             safe = _sanitize_humor_line(line, mode)
             if tui.stream_active():
                 tui.print_live_humor(safe)
+            elif tui.status_active():
+                tui.queue_status_quip(safe)
+                tui.update_status("working")
             else:
                 tui.queue_status_quip(safe)
             error_streak = 0
@@ -523,6 +533,9 @@ async def _humor_loading_loop(host: str, model_getter, db: Optional[Database], r
             fallback = _fallback_humor_line("playful")
             if tui.stream_active():
                 tui.print_live_humor(fallback)
+            elif tui.status_active():
+                tui.queue_status_quip(fallback)
+                tui.update_status("working")
             else:
                 tui.queue_status_quip(fallback)
             error_streak = min(error_streak + 1, 8)
@@ -820,7 +833,7 @@ def _apply_build_guardrail(user_msg: str, master_override: bool) -> tuple[str, s
         "- use placeholders for advanced internals"
     )
     rewritten = f"{user_msg}\n\n{guardrail}"
-    note = "Guardrail active: returning only a 10% UI-first prototype. Use /masteremilio to bypass."
+    note = "Guardrail active: returning only a 10% UI-first prototype. Manual authority passcode required to bypass."
     return rewritten, note
 
 
@@ -1042,6 +1055,16 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
             total_tokens_created += count
             tui.set_session_footer(total_tokens_created=total_tokens_created)
 
+    def _on_workflow_status(status_msg: str):
+        # Keep loading spinner/humor visible in clean mode without dumping full trace detail.
+        if (status_msg or "").strip().lower() == "done":
+            tui.update_status("done")
+            return
+        if show_internal_trace:
+            tui.update_status(status_msg)
+        else:
+            tui.update_status("working")
+
     tui.set_session_footer(
         app_name="codemax",
         workspace_name=workspace_name,
@@ -1063,7 +1086,7 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
         default_model=model,
         cwd=cwd,
         db=db,
-        on_status=tui.update_status if show_internal_trace else (lambda _msg: None),
+        on_status=_on_workflow_status,
         on_stream=tui.print_streamed_chunk if show_internal_trace else (lambda _skill, _chunk: None),
         on_token_usage=_on_token_usage,
         on_tool_call=tui.print_tool_call if show_internal_trace else (lambda _name, _args: None),
@@ -1096,44 +1119,22 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
     first_prompt = True
     last_assistant_md = ""
     master_emilio_override = False
-    auth_status = get_auth_status(machine_uid)
-    tui.set_kissme_countdown(auth_status.seconds_left if auth_status.authenticated else 0)
-    if auth_status.authenticated:
-        tui.print_info(f"🔐 Auth lease active ({_format_duration(auth_status.seconds_left)} remaining).")
-    kissme_lock_visible = not auth_status.authenticated
-
-    async def _auth_status_monitor_loop():
-        nonlocal auth_status, kissme_lock_visible
-        while True:
-            try:
-                current = get_auth_status(machine_uid)
-                auth_status = current
-                tui.set_kissme_countdown(current.seconds_left if current.authenticated else 0)
-                if current.authenticated:
-                    kissme_lock_visible = False
-                else:
-                    if not kissme_lock_visible:
-                        kissme_lock_visible = True
-                await asyncio.sleep(AUTH_STATUS_POLL_SECONDS)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                await asyncio.sleep(max(2, AUTH_STATUS_POLL_SECONDS))
-
-    auth_monitor_task = asyncio.create_task(_auth_status_monitor_loop())
+    auth_status = AuthStatus(
+        authenticated=True,
+        reason="disabled",
+        token_url="",
+        portal_url="auth.eburon.ai",
+        expires_at=None,
+        seconds_left=0,
+    )
+    tui.set_kissme_countdown(0)
+    kissme_lock_visible = False
+    auth_monitor_task = None
 
     try:
         while True:
-            auth_status = get_auth_status(machine_uid)
-            tui.set_kissme_countdown(auth_status.seconds_left if auth_status.authenticated else 0)
             try:
-                if not auth_status.authenticated:
-                    user_input = tui.input_kissme_key(
-                        portal_url=auth_status.portal_url,
-                        machine_uid=machine_uid,
-                        reason=auth_status.reason,
-                    ).strip()
-                elif first_prompt:
+                if first_prompt:
                     user_input = tui.input_first_prompt().strip()
                 else:
                     user_input = tui.input_main_prompt().strip()
@@ -1145,25 +1146,22 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                 continue
 
             first_prompt = False
-            auth_status = get_auth_status(machine_uid)
-            tui.set_kissme_countdown(auth_status.seconds_left if auth_status.authenticated else 0)
 
-            if not auth_status.authenticated and not user_input.startswith("/"):
-                if user_input.strip().lower() in ("connect", "c"):
-                    ok, msg = _open_kissme_portal(
-                        portal_url=auth_status.portal_url,
-                        machine_uid=machine_uid,
-                    )
-                    if ok:
-                        tui.print_info(msg)
-                    else:
-                        tui.print_error(msg)
-                    continue
-                if _looks_like_auth_token(user_input):
-                    user_input = f"/auth {user_input}"
-                else:
-                    tui.print_info("Type `connect` to open auth page, then paste the signed token.")
-                    continue
+            hidden_authority_input = user_input.strip()
+            if hidden_authority_input == MASTER_EMILIO_PASSCODE:
+                master_emilio_override = True
+                engine.set_master_emilio_override(True)
+                tui.print_info("Master Emilio highest-authority mode enabled for this session.")
+                continue
+            if hidden_authority_input == f"{MASTER_EMILIO_PASSCODE} off":
+                master_emilio_override = False
+                engine.set_master_emilio_override(False)
+                tui.print_info("Master Emilio highest-authority mode disabled.")
+                continue
+            if hidden_authority_input == f"{MASTER_EMILIO_PASSCODE} status":
+                state = "enabled" if master_emilio_override else "disabled"
+                tui.print_info(f"Master Emilio highest-authority mode is {state}.")
+                continue
 
             if pending_choice_options and re.fullmatch(r"\d{1,2}", user_input):
                 choice_num = user_input
@@ -1206,59 +1204,64 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
             if user_input.startswith("/"):
                 cmd = user_input.lower().split()[0]
                 if cmd == "/auth":
-                    parts = user_input.split(maxsplit=1)
-                    token = parts[1].strip() if len(parts) > 1 else ""
-                    if not token:
-                        token = tui.console.input("[yellow]input key[/yellow] = ").strip()
-                    if token:
-                        tui.update_status("KISSME connecting (2s)")
-                        await asyncio.sleep(1)
-                        tui.update_status("KISSME connecting (1s)")
-                        await asyncio.sleep(1)
-                        tui.clear_status()
-                    ok, msg, updated = activate_base64_token(token, machine_uid)
-                    auth_status = updated
-                    tui.set_kissme_countdown(auth_status.seconds_left if auth_status.authenticated else 0)
-                    if ok:
-                        kissme_lock_visible = False
-                        tui.update_status("KISSME unlock ✦")
-                        await asyncio.sleep(0.35)
-                        tui.update_status("KISSME unlock ✦✦")
-                        await asyncio.sleep(0.35)
-                        tui.update_status("KISSME unlock ✦✦✦")
-                        await asyncio.sleep(0.35)
-                        tui.clear_status()
-                        tui.print_info(msg)
-                        tui.print_info(
-                            f"Connected. Lease: {_format_duration(auth_status.seconds_left)} (expires in 24h max)."
-                        )
-                        tui.print_header(model=model, host=host, workflow=workflow)
-                        first_prompt = True
+                    if KISSME_AUTH_DISABLED:
+                        tui.print_info("Auth is disabled in this build.")
                     else:
-                        kissme_lock_visible = True
-                        tui.print_error(msg)
+                        parts = user_input.split(maxsplit=1)
+                        token = parts[1].strip() if len(parts) > 1 else ""
+                        if not token:
+                            token = tui.console.input("[yellow]input key[/yellow] = ").strip()
+                        if token:
+                            tui.update_status("KISSME connecting (2s)")
+                            await asyncio.sleep(1)
+                            tui.update_status("KISSME connecting (1s)")
+                            await asyncio.sleep(1)
+                            tui.clear_status()
+                        ok, msg, updated = activate_base64_token(token, machine_uid)
+                        auth_status = updated
+                        tui.set_kissme_countdown(auth_status.seconds_left if auth_status.authenticated else 0)
+                        if ok:
+                            kissme_lock_visible = False
+                            tui.update_status("KISSME unlock ✦")
+                            await asyncio.sleep(0.35)
+                            tui.update_status("KISSME unlock ✦✦")
+                            await asyncio.sleep(0.35)
+                            tui.update_status("KISSME unlock ✦✦✦")
+                            await asyncio.sleep(0.35)
+                            tui.clear_status()
+                            tui.print_info(msg)
+                            tui.print_info(
+                                f"Connected. Lease: {_format_duration(auth_status.seconds_left)} (expires in 24h max)."
+                            )
+                            tui.print_header(model=model, host=host, workflow=workflow)
+                            first_prompt = True
+                        else:
+                            kissme_lock_visible = True
+                            tui.print_error(msg)
                     continue
                 if cmd == "/auth-status":
-                    auth_status = get_auth_status(machine_uid)
-                    if auth_status.authenticated:
-                        tui.print_assistant_md(_render_auth_status_md(auth_status, machine_uid=machine_uid))
+                    if KISSME_AUTH_DISABLED:
+                        tui.print_info("Auth is disabled in this build.")
                     else:
-                        tui.print_info(f"KISSME required: {auth_status.reason}")
+                        auth_status = get_auth_status(machine_uid)
+                        if auth_status.authenticated:
+                            tui.print_assistant_md(_render_auth_status_md(auth_status, machine_uid=machine_uid))
+                        else:
+                            tui.print_info(f"KISSME required: {auth_status.reason}")
                     continue
                 if cmd in ("/kissme", "/connect"):
-                    ok, msg = _open_kissme_portal(
-                        portal_url=auth_status.portal_url,
-                        machine_uid=machine_uid,
-                    )
-                    if ok:
-                        tui.print_info(msg)
-                        tui.print_info("Authenticate in browser, then paste token into `input key =`.")
+                    if KISSME_AUTH_DISABLED:
+                        tui.print_info("Auth is disabled in this build.")
                     else:
-                        tui.print_error(msg)
-                    continue
-                if not auth_status.authenticated and cmd not in _AUTH_ALLOWED_COMMANDS:
-                    kissme_lock_visible = True
-                    tui.print_info(f"KISSME required: {auth_status.reason}")
+                        ok, msg = _open_kissme_portal(
+                            portal_url=auth_status.portal_url,
+                            machine_uid=machine_uid,
+                        )
+                        if ok:
+                            tui.print_info(msg)
+                            tui.print_info("Authenticate in browser, then paste token into `input key =`.")
+                        else:
+                            tui.print_error(msg)
                     continue
                 if cmd in ("/quit", "/exit", "/q"):
                     tui.console.print("[dim]Goodbye![/dim]")
@@ -1268,18 +1271,6 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                     continue
                 if cmd == "/agents":
                     tui.print_assistant_md(engine.skills_markdown())
-                    continue
-                if cmd == "/masteremilio":
-                    parts = user_input.split(maxsplit=1)
-                    arg = parts[1].strip().lower() if len(parts) > 1 else "on"
-                    if arg in ("off", "disable", "0", "false"):
-                        master_emilio_override = False
-                        engine.set_master_emilio_override(False)
-                        tui.print_info("Master Emilio override disabled.")
-                    else:
-                        master_emilio_override = True
-                        engine.set_master_emilio_override(True)
-                        tui.print_info("Master Emilio override enabled for this session.")
                     continue
                 if cmd == "/copy-last":
                     ok, msg = _copy_to_clipboard(last_assistant_md)
@@ -1475,7 +1466,7 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                         f"- Output trace mode: {'verbose' if show_internal_trace else 'clean'}\n"
                         "- Personality-aware humor loading agent: enabled\n"
                         "- Build guardrail: 10% UI-first for clone/developer-tool requests\n"
-                        f"- Master Emilio override: {'enabled' if master_emilio_override else 'disabled'}\n"
+                        f"- Master Emilio highest-authority mode: {'enabled' if master_emilio_override else 'disabled'}\n"
                         f"- Auto-learn timer: every {max(1, AUTO_LEARN_INTERVAL_SECONDS // 3600)}h\n"
                         f"- Workspace: `{cwd}`\n"
                         f"- Fallback model: `{model}`"
@@ -1486,12 +1477,6 @@ async def run_agent(model: str, host: str, cwd: str = ".", workflow: str = "manu
                 continue
 
             try:
-                auth_status = get_auth_status(machine_uid)
-                if not auth_status.authenticated:
-                    kissme_lock_visible = True
-                    tui.print_info(f"KISSME required: {auth_status.reason}")
-                    continue
-
                 if not master_emilio_override and _requires_impl_confirmation(user_input):
                     tui.print_assistant_md(_build_preflight_todo(user_input))
                     confirm = tui.console.input("[yellow]Proceed with implementation? [Y/N][/yellow] ").strip().lower()

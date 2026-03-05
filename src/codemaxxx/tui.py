@@ -318,8 +318,6 @@ def print_prompt_footer():
         line2 = Text()
         line2.append("/total tokens created ", style="dim")
         line2.append(f"{_SESSION_TOTAL_TOKENS:,}", style="brand")
-        line2.append(" /kissme ", style="dim")
-        line2.append(_format_hms(_SESSION_KISSME_SECONDS), style="assistant")
         console.print(line1)
         console.print(line2)
         return
@@ -330,8 +328,6 @@ def print_prompt_footer():
     line.append(workspace, style="assistant")
     line.append(" /total tokens created ", style="dim")
     line.append(f"{_SESSION_TOTAL_TOKENS:,}", style="brand")
-    line.append(" /kissme ", style="dim")
-    line.append(_format_hms(_SESSION_KISSME_SECONDS), style="assistant")
     console.print(line)
 
 
@@ -577,10 +573,6 @@ def print_help():
         ("/agents", "Alias for /skills"),
         ("/copy-last", "Copy last assistant response to clipboard"),
         ("/copy <text>", "Copy custom text to clipboard"),
-        ("/connect", "Alias for /kissme"),
-        ("/kissme", "Open KISSME auth portal in browser"),
-        ("/auth <signed-token>", "Authenticate and unlock model access"),
-        ("/auth-status", "Show current auth lease state"),
         ("/skills", "Show dedicated skill agents and model routing"),
         ("/skills-custom", "Show user-created custom skills"),
         ("/skill-create <name>", "Create/update your own skill interactively"),
